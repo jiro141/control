@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import {
   FileText,
   LayoutDashboard,
@@ -142,58 +143,64 @@ export function AppShell() {
         </main>
       </div>
 
-      <nav aria-label="Navegación principal" className="app-mobile-nav safe-bottom print-hidden fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 backdrop-blur lg:hidden">
-        <div className={`grid items-end ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'}`}>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            if (item.elevated) {
+      {createPortal(
+        <nav
+          aria-label="Navegación principal"
+          className="app-mobile-nav safe-bottom print-hidden fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white lg:hidden"
+        >
+          <div className={`app-mobile-nav-items grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'}`}>
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              if (item.elevated) {
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    aria-label="Nueva factura"
+                    className="relative flex min-w-0 items-end justify-center pb-1.5"
+                  >
+                    {({ isActive }) => (
+                      <>
+                        <span
+                          className={`absolute bottom-5 left-1/2 flex h-12 w-12 -translate-x-1/2 items-center justify-center rounded-full text-white shadow-lg ring-4 ring-white transition-colors sm:h-14 sm:w-14 ${
+                            isActive ? 'bg-accent-hover' : 'bg-accent'
+                          }`}
+                        >
+                          <Plus aria-hidden="true" className="h-7 w-7" />
+                        </span>
+                        <span className="text-[10px] font-semibold text-navy">Nueva</span>
+                      </>
+                    )}
+                  </NavLink>
+                );
+              }
+
               return (
                 <NavLink
                   key={item.to}
                   to={item.to}
-                  className="flex flex-col items-center pb-1.5"
+                  end={item.end}
+                  className="flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-semibold"
                 >
                   {({ isActive }) => (
                     <>
-                      <span
-                        className={`-mt-4 flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg ring-4 ring-white transition-colors sm:h-14 sm:w-14 ${
-                          isActive ? 'bg-accent-hover' : 'bg-accent'
+                      <Icon
+                        className={`h-5 w-5 ${
+                          isActive ? 'text-accent' : 'text-slate-500'
                         }`}
-                      >
-                        <Plus className="h-7 w-7" />
-                      </span>
-                      <span className="mt-0.5 text-[10px] font-semibold text-navy">
-                        Nueva
+                      />
+                      <span className={isActive ? 'text-navy' : 'text-slate-500'}>
+                        {item.label}
                       </span>
                     </>
                   )}
                 </NavLink>
               );
-            }
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className="flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-semibold"
-              >
-                {({ isActive }) => (
-                  <>
-                    <Icon
-                      className={`h-5 w-5 ${
-                        isActive ? 'text-accent' : 'text-slate-500'
-                      }`}
-                    />
-                    <span className={isActive ? 'text-navy' : 'text-slate-500'}>
-                      {item.label}
-                    </span>
-                  </>
-                )}
-              </NavLink>
-            );
-          })}
-        </div>
-      </nav>
+            })}
+          </div>
+        </nav>,
+        document.body,
+      )}
     </div>
   );
 }
