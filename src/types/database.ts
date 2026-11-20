@@ -40,7 +40,14 @@ export interface Customer {
 
 export interface CustomerSummary extends Customer {
   invoice_count: number;
-  outstanding: number;
+  outstanding: CustomerBalance[];
+  unknown_currency: boolean;
+}
+
+export interface CustomerBalance {
+  currency_code: string;
+  currency_symbol: string;
+  amount: number;
 }
 
 export interface Invoice {

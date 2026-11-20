@@ -16,7 +16,7 @@ import {
 import { describeError } from '../lib/errors';
 import { BUSINESS_CURRENCY, invoiceCurrency, parseDecimal, roundMoney } from '../lib/format';
 import type {
-  CustomerSummary,
+  Customer,
   InvoiceFormData,
   InvoiceInputItem,
   InvoiceItem,
@@ -85,7 +85,7 @@ export function InvoiceFormPage() {
   const navigate = useNavigate();
   const { notify } = useToast();
 
-  const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [currency, setCurrency] = useState<{ currency_code: string; currency_symbol: string }>(BUSINESS_CURRENCY);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);

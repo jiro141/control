@@ -1,8 +1,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { InvoiceBalance, Payment } from '../types/database';
+import type { Customer, InvoiceBalance, Payment } from '../types/database';
 import { readAllPages } from './pagination.ts';
 
 type DatabaseReader = Pick<SupabaseClient, 'from'>;
+
+export function readCustomers(database: DatabaseReader): Promise<Customer[]> {
+  return readAllPages<Customer>((from, to) =>
+    database.from('customers').select('*').order('name').order('id').range(from, to),
+  );
+}
 
 export function readInvoiceBalances(database: DatabaseReader): Promise<InvoiceBalance[]> {
   return readAllPages<InvoiceBalance>((from, to) =>

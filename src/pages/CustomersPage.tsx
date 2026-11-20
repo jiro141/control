@@ -12,6 +12,7 @@ import {
 import { PageHeader } from '../components/PageHeader';
 import { Money } from '../components/Money';
 import { useAuth } from '../context/AuthContext';
+import { useSettings } from '../context/SettingsContext';
 import { EmptyState } from '../components/EmptyState';
 import { Spinner } from '../components/Spinner';
 import { Modal } from '../components/Modal';
@@ -21,22 +22,30 @@ import {
   createCustomer,
   deleteCustomer,
   fetchCustomers,
+  fetchInvoices,
   updateCustomer,
 } from '../lib/api';
+import { summarizeCustomers } from '../lib/customerSummary';
 import { describeError } from '../lib/errors';
-import type { CustomerSummary } from '../types/database';
+import type { Customer, InvoiceBalance } from '../types/database';
+
+const noInvoices: InvoiceBalance[] = [];
 
 export function CustomersPage() {
   const { isAdmin } = useAuth();
+  const { settings, loading: settingsLoading, refresh: refreshSettings } = useSettings();
   const { notify } = useToast();
 
-  const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceBalance[] | null>(null);
+  const [invoicesLoading, setInvoicesLoading] = useState(true);
+  const [invoicesError, setInvoicesError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<CustomerSummary | null>(null);
+  const [editing, setEditing] = useState<Customer | null>(null);
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
@@ -44,7 +53,7 @@ export function CustomersPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [deleteTarget, setDeleteTarget] = useState<CustomerSummary | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -60,31 +69,39 @@ export function CustomersPage() {
     }
   }, []);
 
+  const loadInvoices = useCallback(async () => {
+    setInvoicesLoading(true);
+    setInvoicesError(null);
+    try {
+      setInvoices(await fetchInvoices());
+    } catch (cause) {
+      setInvoices(null);
+      setInvoicesError(describeError(cause));
+    } finally {
+      setInvoicesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadInvoices();
+  }, [load, loadInvoices]);
+
+  const summary = useMemo(
+    () => summarizeCustomers(customers, invoices ?? noInvoices, settings),
+    [customers, invoices, settings],
+  );
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return customers;
-    return customers.filter((customer) => {
+    if (!query) return summary.customers;
+    return summary.customers.filter((customer) => {
       const haystack = [customer.name, customer.address ?? '', customer.phone ?? '']
         .join(' ')
         .toLowerCase();
       return haystack.includes(query);
     });
-  }, [customers, search]);
-
-  const totals = useMemo(() => {
-    let outstanding = 0;
-    for (const customer of customers) {
-      outstanding += Number(customer.outstanding) || 0;
-    }
-    return {
-      count: customers.length,
-      outstanding: Math.round(outstanding * 100) / 100,
-    };
-  }, [customers]);
+  }, [summary.customers, search]);
 
   const openCreate = () => {
     setEditing(null);
@@ -96,7 +113,7 @@ export function CustomersPage() {
     setModalOpen(true);
   };
 
-  const openEdit = (customer: CustomerSummary) => {
+  const openEdit = (customer: Customer) => {
     setEditing(customer);
     setName(customer.name);
     setAddress(customer.address ?? '');
@@ -107,6 +124,7 @@ export function CustomersPage() {
   };
 
   const handleSave = async () => {
+    if (!isAdmin) return;
     if (!name.trim()) {
       setFormError('Ingresa el nombre del cliente.');
       return;
@@ -137,7 +155,7 @@ export function CustomersPage() {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
+    if (!isAdmin || !deleteTarget) return;
     setDeleteLoading(true);
     try {
       await deleteCustomer(deleteTarget.id);
@@ -155,7 +173,7 @@ export function CustomersPage() {
     <div>
       <PageHeader
         title="Clientes"
-        subtitle="Consulta clientes, facturas y saldos pendientes en COP."
+        subtitle="Consulta los clientes y sus saldos pendientes por moneda."
         actions={isAdmin ? (
           <button type="button" onClick={openCreate} className="btn btn-accent">
             <Plus className="h-4 w-4" />
@@ -178,14 +196,46 @@ export function CustomersPage() {
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
           <span>
-            {totals.count} {totals.count === 1 ? 'cliente registrado' : 'clientes registrados'}
+            {customers.length} {customers.length === 1 ? 'cliente registrado' : 'clientes registrados'}
           </span>
-          <span>
-            Saldo pendiente total:{' '}
-            <Money value={totals.outstanding} className="font-bold text-navy" />
-          </span>
+          {invoices && !invoicesLoading ? (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              {summary.outstanding.length > 0 ? (
+                <>
+                  <span>Saldo pendiente total</span>
+                  {summary.outstanding.map((balance) => (
+                    <Money key={balance.currency_code} value={balance.amount} invoice={balance} className="font-bold text-navy" />
+                  ))}
+                </>
+              ) : !summary.unknownCurrency ? <span>Sin saldo pendiente</span> : null}
+            </div>
+          ) : null}
         </div>
       </div>
+
+      {invoicesError ? (
+        <div role="alert" className="card mb-4 flex flex-wrap items-center justify-between gap-2 p-4">
+          <div>
+            <p className="text-sm font-semibold text-navy">No se pudieron cargar los saldos de los clientes.</p>
+            <p className="text-sm text-slate-600">{invoicesError}</p>
+          </div>
+          <button type="button" onClick={() => void loadInvoices()} className="btn btn-ghost btn-sm">
+            Reintentar saldos
+          </button>
+        </div>
+      ) : null}
+      {summary.unknownCurrency ? (
+        <div role="status" className="card mb-4 flex flex-wrap items-center justify-between gap-2 p-4">
+          <p className="text-sm text-slate-600">
+            {settingsLoading ? 'Cargando la moneda de los saldos históricos…' : 'Hay saldos históricos cuya moneda no se pudo identificar.'}
+          </p>
+          {!settingsLoading ? (
+            <button type="button" onClick={() => void refreshSettings()} className="btn btn-ghost btn-sm">
+              Reintentar moneda
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-slate-500">
@@ -225,10 +275,12 @@ export function CustomersPage() {
                   <h2 className="truncate text-sm font-bold text-navy">
                     {customer.name}
                   </h2>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    {customer.invoice_count}{' '}
-                    {customer.invoice_count === 1 ? 'factura' : 'facturas'}
-                  </p>
+                  {invoices && !invoicesLoading ? (
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {customer.invoice_count}{' '}
+                      {customer.invoice_count === 1 ? 'factura vigente' : 'facturas vigentes'}
+                    </p>
+                  ) : null}
                 </div>
                 {isAdmin ? <div className="flex shrink-0 items-center gap-1">
                   <button
@@ -271,24 +323,26 @@ export function CustomersPage() {
                 </p>
               ) : null}
 
-              <div className="mt-auto flex items-center justify-between border-t border-line pt-3 text-xs">
-                <span className="text-slate-500">Saldo pendiente</span>
-                <Money
-                  value={customer.outstanding}
-                  className={`font-bold ${
-                    Number(customer.outstanding) > 0.009
-                      ? 'text-red-600'
-                      : 'text-emerald-600'
-                  }`}
-                />
-              </div>
+              {invoices && !invoicesLoading ? (
+                <div className="mt-auto flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-t border-line pt-3 text-xs">
+                  <span className="text-slate-500">Saldo pendiente</span>
+                  {customer.outstanding.map((balance) => (
+                    <Money key={balance.currency_code} value={balance.amount} invoice={balance} className="font-bold text-red-600" />
+                  ))}
+                  {customer.unknown_currency ? (
+                    <span className="text-slate-600">Moneda histórica por identificar</span>
+                  ) : customer.outstanding.length === 0 ? (
+                    <span className="font-bold text-emerald-600">Sin saldo</span>
+                  ) : null}
+                </div>
+              ) : null}
             </article>
           ))}
         </div>
       )}
 
       <Modal
-        open={modalOpen}
+        open={isAdmin && modalOpen}
         title={editing ? 'Editar cliente' : 'Nuevo cliente'}
         onClose={() => setModalOpen(false)}
         footer={
@@ -382,7 +436,7 @@ export function CustomersPage() {
       </Modal>
 
       <ConfirmDialog
-        open={Boolean(deleteTarget)}
+        open={isAdmin && Boolean(deleteTarget)}
         title="Eliminar cliente"
         message={`¿Confirmas que deseas eliminar a ${deleteTarget?.name ?? ''}? Las facturas asociadas se conservarán, pero quedarán sin cliente vinculado.`}
         confirmLabel="Eliminar cliente"

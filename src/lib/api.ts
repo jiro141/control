@@ -1,12 +1,11 @@
 import { supabase } from './supabase';
 import { describeError } from './errors';
-import { readDashboardPayments, readInvoiceBalances } from './dashboardQueries';
+import { readCustomers, readDashboardPayments, readInvoiceBalances } from './dashboardQueries';
 import { BUSINESS_CURRENCY } from './format';
 import { readAllPages } from './pagination';
 import type {
   Customer,
   CustomerInput,
-  CustomerSummary,
   InvoiceBalance,
   InvoiceFormData,
   InvoiceItem,
@@ -82,36 +81,8 @@ export async function saveSettings(input: SettingsInput): Promise<Settings> {
   return data as unknown as Settings;
 }
 
-export async function fetchCustomers(): Promise<CustomerSummary[]> {
-  const [customers, invoices] = await Promise.all([
-    readAllPages<Customer>((from, to) =>
-      supabase.from('customers').select('*').order('name').order('id').range(from, to),
-    ),
-    readAllPages<Pick<InvoiceBalance, 'customer_id' | 'balance' | 'currency_code'>>((from, to) =>
-      supabase.from('invoice_balances').select('customer_id,balance,currency_code')
-        .is('voided_at', null).order('id').range(from, to),
-    ),
-  ]).catch(fail);
-
-  const stats = new Map<string, { count: number; outstanding: number }>();
-  for (const invoice of invoices) {
-    if (!invoice.customer_id) continue;
-    const current = stats.get(invoice.customer_id) ?? { count: 0, outstanding: 0 };
-    current.count += 1;
-    if (invoice.currency_code === BUSINESS_CURRENCY.currency_code) {
-      current.outstanding += Math.max(0, Number(invoice.balance) || 0);
-    }
-    stats.set(invoice.customer_id, current);
-  }
-
-  return customers.map((customer) => {
-    const stat = stats.get(customer.id) ?? { count: 0, outstanding: 0 };
-    return {
-      ...customer,
-      invoice_count: stat.count,
-      outstanding: Math.round(stat.outstanding * 100) / 100,
-    };
-  });
+export async function fetchCustomers(): Promise<Customer[]> {
+  return readCustomers(supabase).catch(fail);
 }
 
 export async function createCustomer(input: CustomerInput): Promise<Customer> {
