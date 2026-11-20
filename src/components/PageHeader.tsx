@@ -23,17 +23,17 @@ export function PageHeader({
         {backTo ? (
           <Link
             to={backTo}
-            className="mb-2 inline-flex items-center gap-1 text-xs font-semibold text-sky transition-colors hover:text-sky-soft"
+            className="mb-1 inline-flex min-h-9 items-center gap-1 text-xs font-semibold text-accent transition-colors hover:text-accent-hover sm:mb-2 sm:min-h-0"
           >
             <ChevronLeft className="h-4 w-4" />
             {backLabel}
           </Link>
         ) : null}
-        <h1 className="text-xl font-extrabold tracking-tight text-navy sm:text-2xl">
+        <h1 className="break-words text-xl font-extrabold tracking-tight text-navy sm:text-2xl">
           {title}
         </h1>
         {subtitle ? (
-          <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
+          <p className="mt-1 break-words text-sm text-slate-500">{subtitle}</p>
         ) : null}
       </div>
       {actions ? (

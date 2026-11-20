@@ -5,8 +5,10 @@ import {
   capitalize,
   formatDate,
   formatInvoiceNumber,
+  invoiceCurrency,
   sanitizeFileName,
 } from '../format';
+import { excelCurrencyFormat } from './currencyFormat';
 import type { InvoiceBalance, InvoiceItem, Payment, Settings } from '../../types/database';
 
 const NAVY = 'FF0B2340';
@@ -23,11 +25,6 @@ function thinBlue(): Partial<Borders> {
 
 function solidFill(argb: string): Fill {
   return { type: 'pattern', pattern: 'solid', fgColor: { argb } };
-}
-
-function moneyFormat(symbol: string): string {
-  const safe = (symbol || '$').replace(/"/g, '').trim() || '$';
-  return `"${safe}"#,##0.00`;
 }
 
 function borderRow(sheet: Worksheet, row: number, from: number, to: number) {
@@ -48,7 +45,7 @@ export async function downloadInvoiceExcel(
   workbook.created = new Date();
 
   const number = formatInvoiceNumber(invoice.number);
-  const currency = moneyFormat(settings.currency_symbol);
+  const currency = excelCurrencyFormat(invoiceCurrency(invoice));
 
   const sheet = workbook.addWorksheet(`Factura ${number}`, {
     views: [{ showGridLines: false }],
@@ -102,9 +99,15 @@ export async function downloadInvoiceExcel(
 
   sheet.mergeCells('A11:G11');
   const contact = sheet.getCell('A11');
-  contact.value = [settings.phone_primary, settings.phone_secondary, settings.website]
-    .filter((value): value is string => Boolean(value && value.trim()))
-    .join('  ·  ');
+  const contactParts = [
+    settings.phone_primary,
+    settings.phone_secondary,
+    settings.website,
+  ].filter((value): value is string => Boolean(value && value.trim()));
+  if (settings.tax_id && settings.tax_id.trim()) {
+    contactParts.push(`RIF: ${settings.tax_id.trim()}`);
+  }
+  contact.value = contactParts.join('  ·  ');
   contact.font = { size: 10, color: { argb: SLATE } };
   sheet.getRow(11).height = 16;
 
@@ -112,7 +115,7 @@ export async function downloadInvoiceExcel(
 
   sheet.mergeCells('A13:G13');
   const documentTitle = sheet.getCell('A13');
-  documentTitle.value = 'FACTURA COMERCIAL';
+  documentTitle.value = invoice.status === 'anulada' ? 'FACTURA COMERCIAL ANULADA' : 'FACTURA COMERCIAL';
   documentTitle.font = { bold: true, size: 15, color: { argb: NAVY } };
   documentTitle.alignment = { horizontal: 'center', vertical: 'middle' };
   documentTitle.fill = solidFill(SKY_LIGHT);
@@ -224,6 +227,20 @@ export async function downloadInvoiceExcel(
   sheet.getRow(rowIndex).height = 26;
   rowIndex += 2;
 
+  const noteText = invoice.notes?.trim();
+  if (noteText) {
+    sheet.mergeCells(rowIndex, 1, rowIndex, 7);
+    const noteCell = sheet.getCell(rowIndex, 1);
+    noteCell.value = `Nota: ${noteText}`;
+    noteCell.font = { italic: true, color: { argb: SLATE } };
+    noteCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+    sheet.getRow(rowIndex).height = Math.max(
+      18,
+      Math.ceil(noteText.length / 95) * 15,
+    );
+    rowIndex += 2;
+  }
+
   sheet.mergeCells(rowIndex, 1, rowIndex, 4);
   const signature = sheet.getCell(rowIndex, 1);
   signature.value = 'FIRMA CLIENTE';
@@ -301,7 +318,7 @@ export async function downloadInvoiceExcel(
     paymentsSheet.getCell(paymentRow, 1).value = formatDate(payment.paid_at);
     paymentsSheet.getCell(paymentRow, 2).value = Number(payment.amount);
     paymentsSheet.getCell(paymentRow, 2).numFmt = currency;
-    paymentsSheet.getCell(paymentRow, 3).value = capitalize(payment.method);
+    paymentsSheet.getCell(paymentRow, 3).value = `${capitalize(payment.method)}${payment.voided_at ? ' · Anulado' : ''}`;
     paymentsSheet.getCell(paymentRow, 4).value = payment.note ?? '';
     paymentsSheet.getCell(paymentRow, 2).alignment = { horizontal: 'right' };
     for (let column = 1; column <= 4; column += 1) {

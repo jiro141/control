@@ -59,7 +59,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="print-hidden pointer-events-none fixed inset-x-3 bottom-24 z-[60] flex flex-col items-end gap-2 lg:bottom-6 lg:inset-x-auto lg:right-6">
+      <div className="print-hidden pointer-events-none fixed inset-x-3 bottom-[calc(6rem+env(safe-area-inset-bottom))] z-[60] flex flex-col items-end gap-2 lg:bottom-6 lg:inset-x-auto lg:right-6">
         {toasts.map((toast) => {
           const Icon = kindIcons[toast.kind];
           return (
@@ -69,7 +69,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               className={`pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-xl border px-4 py-3 shadow-card ${kindStyles[toast.kind]}`}
             >
               <Icon className="mt-0.5 h-5 w-5 shrink-0" />
-              <p className="flex-1 text-sm font-medium leading-snug">{toast.message}</p>
+              <p className="min-w-0 flex-1 break-words text-sm font-medium leading-snug">{toast.message}</p>
               <button
                 type="button"
                 onClick={() => dismiss(toast.id)}

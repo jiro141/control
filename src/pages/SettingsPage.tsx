@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
   Building2,
@@ -14,12 +14,9 @@ import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { useToast } from '../context/ToastContext';
 import { describeError } from '../lib/errors';
-import { formatMoney } from '../lib/format';
 
 interface SettingsForm {
   business_name: string;
-  currency_code: string;
-  currency_symbol: string;
   phone_primary: string;
   phone_secondary: string;
   address: string;
@@ -29,8 +26,6 @@ interface SettingsForm {
 
 const EMPTY_FORM: SettingsForm = {
   business_name: '',
-  currency_code: '',
-  currency_symbol: '',
   phone_primary: '',
   phone_secondary: '',
   address: '',
@@ -39,7 +34,7 @@ const EMPTY_FORM: SettingsForm = {
 };
 
 export function SettingsPage() {
-  const { user, signOut, updatePassword } = useAuth();
+  const { user, isAdmin, profileLoading, signOut, updatePassword } = useAuth();
   const { settings, loading, error, refresh, save } = useSettings();
   const { notify } = useToast();
   const navigate = useNavigate();
@@ -57,8 +52,6 @@ export function SettingsPage() {
     if (!settings) return;
     setForm({
       business_name: settings.business_name,
-      currency_code: settings.currency_code,
-      currency_symbol: settings.currency_symbol,
       phone_primary: settings.phone_primary,
       phone_secondary: settings.phone_secondary,
       address: settings.address ?? '',
@@ -72,12 +65,9 @@ export function SettingsPage() {
   };
 
   const handleSave = async () => {
+    if (!isAdmin) return;
     if (!form.business_name.trim()) {
       setFormError('Ingresa el nombre del negocio.');
-      return;
-    }
-    if (!form.currency_symbol.trim()) {
-      setFormError('Ingresa el símbolo de la moneda.');
       return;
     }
     setSaving(true);
@@ -85,8 +75,6 @@ export function SettingsPage() {
     try {
       await save({
         business_name: form.business_name.trim(),
-        currency_code: form.currency_code.trim() || 'USD',
-        currency_symbol: form.currency_symbol.trim(),
         phone_primary: form.phone_primary.trim(),
         phone_secondary: form.phone_secondary.trim(),
         address: form.address.trim() || null,
@@ -136,7 +124,7 @@ export function SettingsPage() {
   if (loading && !settings) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-slate-500">
-        <Spinner className="h-6 w-6 text-sky" />
+        <Spinner className="h-6 w-6 text-accent" />
         <p className="text-sm font-medium">Cargando configuración…</p>
       </div>
     );
@@ -161,8 +149,6 @@ export function SettingsPage() {
     );
   }
 
-  const previewSymbol = form.currency_symbol.trim() || '$';
-
   return (
     <div>
       <PageHeader
@@ -173,11 +159,14 @@ export function SettingsPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <section className="card p-4 sm:p-5 lg:col-span-2">
           <div className="flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-sky" />
+            <Building2 className="h-4 w-4 text-accent" />
             <h2 className="text-sm font-bold text-navy">Datos del negocio</h2>
+            {!profileLoading && !isAdmin ? (
+              <span className="text-xs text-slate-600">Solo lectura</span>
+            ) : null}
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <fieldset className="mt-4 grid gap-3 sm:grid-cols-2" disabled={!isAdmin}>
             <div className="sm:col-span-2">
               <label className="label" htmlFor="settings-name">
                 Nombre del negocio
@@ -189,32 +178,6 @@ export function SettingsPage() {
                 onChange={(event) => setField('business_name', event.target.value)}
                 className="input"
                 placeholder="Venta de todo tipo de madera para minería"
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="settings-currency-code">
-                Código de moneda
-              </label>
-              <input
-                id="settings-currency-code"
-                type="text"
-                value={form.currency_code}
-                onChange={(event) => setField('currency_code', event.target.value)}
-                className="input"
-                placeholder="USD"
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="settings-currency-symbol">
-                Símbolo de moneda
-              </label>
-              <input
-                id="settings-currency-symbol"
-                type="text"
-                value={form.currency_symbol}
-                onChange={(event) => setField('currency_symbol', event.target.value)}
-                className="input"
-                placeholder="$"
               />
             </div>
             <div>
@@ -282,20 +245,17 @@ export function SettingsPage() {
                 placeholder="www.ejemplo.com"
               />
             </div>
-          </div>
+          </fieldset>
 
           <div className="mt-4 flex flex-col gap-3 rounded-xl bg-surface px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                Vista previa de moneda
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Moneda de las facturas nuevas
               </p>
               <p className="text-lg font-extrabold text-navy">
-                {formatMoney(1234.56, previewSymbol)}
+                Peso colombiano (COP)
               </p>
             </div>
-            <p className="text-xs text-slate-500">
-              Formato con separador de miles y dos decimales.
-            </p>
           </div>
 
           {formError ? (
@@ -304,7 +264,7 @@ export function SettingsPage() {
             </p>
           ) : null}
 
-          <div className="mt-4">
+          {isAdmin ? <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => void handleSave()}
@@ -314,18 +274,19 @@ export function SettingsPage() {
               {saving ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}
               Guardar configuración
             </button>
-          </div>
+            <Link to="/usuarios" className="btn btn-ghost">Gestionar usuarios</Link>
+          </div> : null}
         </section>
 
         <div className="space-y-4">
           <section className="card p-4 sm:p-5">
             <div className="flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-sky" />
+              <KeyRound className="h-4 w-4 text-accent" />
               <h2 className="text-sm font-bold text-navy">Cuenta y seguridad</h2>
             </div>
 
             <div className="mt-3 rounded-xl bg-surface px-3 py-2.5">
-              <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 <Mail className="h-3.5 w-3.5" />
                 Correo de acceso
               </p>

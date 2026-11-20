@@ -22,15 +22,36 @@ export function describeError(error: unknown): string {
     (lower.includes('relation') && lower.includes('does not exist')) ||
     lower.includes('could not find the table')
   ) {
-    return 'No se encontró el esquema. Ejecuta supabase/schema.sql en Supabase.';
+    return 'No se encontró el esquema. Aplica la migración de Supabase indicada en el README.';
   }
 
   if (code === 'PGRST116') {
     return 'No se encontró el registro solicitado.';
   }
 
+  if (code === 'PGRST202') {
+    return 'La base de datos no tiene las funciones requeridas. Aplica la migración indicada en el README.';
+  }
+
   if (code === 'PGRST205' || lower.includes('schema cache')) {
     return 'La tabla no está disponible todavía. Recarga el esquema en Supabase y espera unos segundos.';
+  }
+
+  if (code === '23503') {
+    return 'No se puede completar la operación porque hay registros relacionados.';
+  }
+
+  if (code === '22P02') {
+    return 'El identificador proporcionado no es válido.';
+  }
+
+  if (code === 'PGRST301' || lower.includes('jwt expired')) {
+    return 'Tu sesión venció. Inicia sesión nuevamente.';
+  }
+
+  // Errores lanzados con raise exception en las RPC: ya vienen en español.
+  if (code === 'P0001' && message) {
+    return message;
   }
 
   if (lower.includes('invalid login credentials')) {

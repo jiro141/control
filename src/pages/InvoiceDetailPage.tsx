@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import {
   AlertCircle,
   FileDown,
@@ -22,8 +23,8 @@ import { EmptyState } from '../components/EmptyState';
 import { useSettings } from '../context/SettingsContext';
 import { useToast } from '../context/ToastContext';
 import {
-  deleteInvoice,
-  deletePayment,
+  voidInvoice,
+  voidPayment,
   fetchInvoice,
   fetchInvoiceItems,
   fetchPayments,
@@ -31,14 +32,11 @@ import {
 import { describeError } from '../lib/errors';
 import { downloadBlob } from '../lib/download';
 import {
-  buildInvoicePdfBlob,
-  downloadInvoicePdf,
-} from '../lib/pdf/InvoicePdf';
-import { downloadInvoiceExcel } from '../lib/excel/invoiceExcel';
-import {
   capitalize,
   formatDate,
   formatInvoiceNumber,
+  formatMoney,
+  invoiceCurrency,
   sanitizeFileName,
 } from '../lib/format';
 import type { InvoiceBalance, InvoiceItem, Payment } from '../types/database';
@@ -47,7 +45,7 @@ type BusyAction = 'pdf' | 'excel' | 'share' | null;
 
 export function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const { settings } = useSettings();
   const { notify } = useToast();
 
@@ -99,6 +97,7 @@ export function InvoiceDetailPage() {
     }
     setBusy('pdf');
     try {
+      const { downloadInvoicePdf } = await import('../lib/pdf/InvoicePdf');
       await downloadInvoicePdf(invoice, items, settings);
       notify('PDF generado correctamente.', 'success');
     } catch (cause) {
@@ -116,6 +115,7 @@ export function InvoiceDetailPage() {
     }
     setBusy('excel');
     try {
+      const { downloadInvoiceExcel } = await import('../lib/excel/invoiceExcel');
       await downloadInvoiceExcel(invoice, items, payments, settings);
       notify('Excel generado correctamente.', 'success');
     } catch (cause) {
@@ -133,6 +133,7 @@ export function InvoiceDetailPage() {
     }
     setBusy('share');
     try {
+      const { buildInvoicePdfBlob } = await import('../lib/pdf/InvoicePdf');
       const blob = await buildInvoicePdfBlob(invoice, items, settings);
       const filename = `Factura-${formatInvoiceNumber(invoice.number)}-${sanitizeFileName(
         invoice.customer_name,
@@ -165,24 +166,26 @@ export function InvoiceDetailPage() {
   };
 
   const handleDeleteInvoice = async () => {
-    if (!invoice) return;
+    if (!invoice || !isAdmin || invoice.voided_at) return;
     setDeleteLoading(true);
     try {
-      await deleteInvoice(invoice.id);
-      notify('Factura eliminada.', 'success');
-      navigate('/facturas', { replace: true });
+      await voidInvoice(invoice.id);
+      notify('Factura anulada.', 'success');
+      setDeleteOpen(false);
+      await load();
     } catch (cause) {
       notify(describeError(cause), 'error');
+    } finally {
       setDeleteLoading(false);
     }
   };
 
   const handleDeletePayment = async () => {
-    if (!paymentToDelete) return;
+    if (!paymentToDelete || !isAdmin || invoice?.voided_at || paymentToDelete.voided_at) return;
     setPaymentDeleteLoading(true);
     try {
-      await deletePayment(paymentToDelete.id);
-      notify('Pago eliminado.', 'success');
+      await voidPayment(paymentToDelete.id);
+      notify('Pago anulado.', 'success');
       setPaymentToDelete(null);
       await load();
     } catch (cause) {
@@ -195,7 +198,7 @@ export function InvoiceDetailPage() {
   if (loading) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-slate-500">
-        <Spinner className="h-6 w-6 text-sky" />
+        <Spinner className="h-6 w-6 text-accent" />
         <p className="text-sm font-medium">Cargando factura…</p>
       </div>
     );
@@ -228,6 +231,10 @@ export function InvoiceDetailPage() {
   }
 
   const number = formatInvoiceNumber(invoice.number);
+  const canEdit = isAdmin && invoice.status !== 'anulada';
+  const canPay = canEdit && Number(invoice.balance) > 0;
+  const activePayments = payments.filter((payment) => !payment.voided_at).length;
+  const { currency_code, currency_symbol } = invoiceCurrency(invoice);
 
   return (
     <div className="space-y-4">
@@ -235,33 +242,33 @@ export function InvoiceDetailPage() {
         title={`Factura N° ${number}`}
         subtitle={`${invoice.customer_name} · ${formatDate(invoice.issue_date)}`}
         backTo="/facturas"
-        actions={
+        actions={canEdit ? (
           <>
             <Link to={`/facturas/${invoice.id}/editar`} className="btn btn-ghost">
               <Pencil className="h-4 w-4" />
               Editar
             </Link>
-            <button
+            {canPay ? <button
               type="button"
               onClick={() => setPaymentOpen(true)}
               className="btn btn-accent"
             >
               <Plus className="h-4 w-4" />
               Registrar pago
-            </button>
+            </button> : null}
           </>
-        }
+        ) : null}
       />
 
       <div className="print-hidden card p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <StatusBadge status={invoice.status} />
-          <div className="grid flex-1 grid-cols-3 gap-2 sm:max-w-md">
+          <div className="grid w-full min-w-0 grid-cols-3 gap-2 sm:max-w-md sm:flex-1">
             <div className="rounded-xl bg-surface px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                 Total
               </p>
-              <Money value={invoice.total} className="text-sm font-bold text-navy" />
+              <Money value={invoice.total} invoice={invoice} className="text-sm font-bold text-navy" />
             </div>
             <div className="rounded-xl bg-emerald-50 px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600">
@@ -269,6 +276,7 @@ export function InvoiceDetailPage() {
               </p>
               <Money
                 value={invoice.paid_amount}
+                invoice={invoice}
                 className="text-sm font-bold text-emerald-700"
               />
             </div>
@@ -276,14 +284,14 @@ export function InvoiceDetailPage() {
               <p className="text-[10px] font-semibold uppercase tracking-wide text-red-500">
                 Saldo
               </p>
-              <Money value={invoice.balance} className="text-sm font-bold text-red-700" />
+              <Money value={invoice.balance} invoice={invoice} className="text-sm font-bold text-red-700" />
             </div>
           </div>
         </div>
       </div>
 
       <div className="print-hidden card p-3">
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
           <button
             type="button"
             onClick={handlePdf}
@@ -332,36 +340,36 @@ export function InvoiceDetailPage() {
             <Printer className="h-4 w-4" />
             Imprimir
           </button>
-          <button
+          {canEdit ? <button
             type="button"
             onClick={() => setDeleteOpen(true)}
             className="btn btn-sm border border-red-200 bg-white text-red-600 hover:bg-red-50"
           >
             <Trash2 className="h-4 w-4" />
-            Eliminar factura
-          </button>
+            Anular factura
+          </button> : null}
         </div>
       </div>
 
       <InvoiceSheet invoice={invoice} items={items} settings={settings} />
 
       <section className="print-hidden card p-4">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-bold text-navy">Pagos registrados</h2>
             <p className="text-xs text-slate-500">
-              {payments.length} {payments.length === 1 ? 'pago' : 'pagos'} ·{' '}
-              <Money value={invoice.paid_amount} className="font-semibold" /> abonado
+              {activePayments} {activePayments === 1 ? 'pago vigente' : 'pagos vigentes'} ·{' '}
+              <Money value={invoice.paid_amount} invoice={invoice} className="font-semibold" /> abonado
             </p>
           </div>
-          <button
+          {canPay ? <button
             type="button"
             onClick={() => setPaymentOpen(true)}
             className="btn btn-ghost btn-sm"
           >
             <Plus className="h-4 w-4" />
             Registrar pago
-          </button>
+          </button> : null}
         </div>
 
         <div className="mt-3">
@@ -369,8 +377,7 @@ export function InvoiceDetailPage() {
             <EmptyState
               icon={Wallet}
               title="Sin pagos registrados"
-              description="Registra el primer abono para actualizar el saldo de la factura."
-              action={
+              action={canPay ? (
                 <button
                   type="button"
                   onClick={() => setPaymentOpen(true)}
@@ -379,36 +386,38 @@ export function InvoiceDetailPage() {
                   <Plus className="h-4 w-4" />
                   Registrar pago
                 </button>
-              }
+              ) : null}
             />
           ) : (
             <ul className="divide-y divide-line">
               {payments.map((payment) => (
                 <li
                   key={payment.id}
-                  className="flex items-start justify-between gap-3 py-3"
+                  className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-3"
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-navy">
                       {capitalize(payment.method)} · {formatDate(payment.paid_at)}
+                      {payment.voided_at ? ' · Anulado' : ''}
                     </p>
                     {payment.note ? (
-                      <p className="mt-0.5 text-xs text-slate-500">{payment.note}</p>
+                      <p className="mt-0.5 break-words text-xs text-slate-500">{payment.note}</p>
                     ) : null}
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="ml-auto flex min-w-0 items-center justify-end gap-2 text-right">
                     <Money
                       value={payment.amount}
-                      className="text-sm font-bold text-emerald-600"
+                      invoice={invoice}
+                      className={payment.voided_at ? 'text-sm text-slate-500 line-through' : 'text-sm font-bold text-emerald-600'}
                     />
-                    <button
+                    {canEdit && !payment.voided_at ? <button
                       type="button"
                       onClick={() => setPaymentToDelete(payment)}
-                      className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                      aria-label="Eliminar pago"
+                      className="icon-button inline-flex shrink-0 items-center justify-center rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                      aria-label="Anular pago"
                     >
                       <Trash2 className="h-4 w-4" />
-                    </button>
+                    </button> : null}
                   </div>
                 </li>
               ))}
@@ -418,17 +427,17 @@ export function InvoiceDetailPage() {
       </section>
 
       <PaymentModal
-        open={paymentOpen}
+        open={paymentOpen && canPay}
         invoice={invoice}
         onClose={() => setPaymentOpen(false)}
         onSaved={load}
       />
 
       <ConfirmDialog
-        open={deleteOpen}
-        title="Eliminar factura"
-        message={`¿Confirmas que deseas eliminar la factura N° ${number} de ${invoice.customer_name}? Se eliminarán también sus artículos y pagos. Esta acción no se puede deshacer.`}
-        confirmLabel="Eliminar factura"
+        open={deleteOpen && canEdit}
+        title="Anular factura"
+        message={`¿Confirmás la anulación de la factura N° ${number} de ${invoice.customer_name}? La factura y sus pagos quedarán en el historial.`}
+        confirmLabel="Anular factura"
         destructive
         loading={deleteLoading}
         onConfirm={() => void handleDeleteInvoice()}
@@ -436,10 +445,10 @@ export function InvoiceDetailPage() {
       />
 
       <ConfirmDialog
-        open={Boolean(paymentToDelete)}
-        title="Eliminar pago"
-        message={`¿Confirmas que deseas eliminar el pago de ${paymentToDelete ? capitalize(paymentToDelete.method) : ''} por ${paymentToDelete ? paymentToDelete.amount : 0}? El saldo de la factura se recalculará.`}
-        confirmLabel="Eliminar pago"
+        open={Boolean(paymentToDelete) && canEdit}
+        title="Anular pago"
+        message={`¿Confirmás la anulación del pago por ${formatMoney(paymentToDelete?.amount, currency_symbol, currency_code)}? Se actualizará el saldo de la factura.`}
+        confirmLabel="Anular pago"
         destructive
         loading={paymentDeleteLoading}
         onConfirm={() => void handleDeletePayment()}

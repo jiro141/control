@@ -31,10 +31,11 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export function AppShell() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin } = useAuth();
   const { settings } = useSettings();
   const { notify } = useToast();
   const navigate = useNavigate();
+  const navItems = NAV_ITEMS.filter((item) => isAdmin || !item.elevated);
 
   const handleLogout = async () => {
     try {
@@ -47,7 +48,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-full bg-surface">
-      <aside className="print-hidden fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-navy text-white lg:flex">
+      <aside className="safe-top print-hidden fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-navy text-white lg:flex">
         <div className="flex items-center gap-3 px-5 py-5">
           <img
             src="/assets/logo.png"
@@ -62,8 +63,8 @@ export function AppShell() {
           </div>
         </div>
 
-        <nav className="mt-2 flex-1 space-y-1 px-3">
-          {NAV_ITEMS.map((item) => {
+        <nav aria-label="Navegación principal" className="mt-2 flex-1 space-y-1 overflow-y-auto px-3">
+          {navItems.map((item) => {
             const Icon = item.icon;
             return (
               <NavLink
@@ -73,7 +74,7 @@ export function AppShell() {
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${
                     item.elevated
-                      ? 'mt-3 bg-sky text-white hover:bg-sky-soft'
+                      ? 'mt-3 bg-accent text-white hover:bg-accent-hover'
                       : isActive
                         ? 'bg-white/10 text-white'
                         : 'text-sky-100/80 hover:bg-white/5 hover:text-white'
@@ -100,14 +101,14 @@ export function AppShell() {
         </div>
       </aside>
 
-      <div className="lg:pl-64">
-        <header className="print-hidden sticky top-0 z-30 border-b border-line bg-white/85 backdrop-blur">
-          <div className="flex h-14 items-center justify-between gap-3 px-4 lg:px-8">
+      <div className="app-shell-content lg:pl-64">
+        <header className="safe-top print-hidden sticky top-0 z-30 border-b border-line bg-white/85 backdrop-blur">
+          <div className="safe-inline flex h-14 items-center justify-between gap-3 lg:px-8">
             <div className="flex min-w-0 items-center gap-2 lg:hidden">
               <img
                 src="/assets/logo.png"
                 alt="Logotipo"
-                className="h-8 w-8 rounded-full"
+                className="h-8 w-8 shrink-0 rounded-full"
               />
               <span className="truncate text-sm font-bold text-navy">
                 Control de Ventas
@@ -126,7 +127,7 @@ export function AppShell() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="btn btn-ghost btn-sm"
+                className="btn btn-ghost btn-sm icon-button"
                 aria-label="Cerrar sesión"
               >
                 <LogOut className="h-4 w-4" />
@@ -136,14 +137,14 @@ export function AppShell() {
           </div>
         </header>
 
-        <main className="app-main mx-auto w-full max-w-6xl px-4 py-5 pb-28 lg:px-8 lg:pb-10">
+        <main className="app-main safe-inline mx-auto w-full min-w-0 max-w-6xl py-5 lg:px-8 lg:pb-10">
           <Outlet />
         </main>
       </div>
 
-      <nav className="print-hidden fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 backdrop-blur lg:hidden safe-bottom">
-        <div className="grid grid-cols-5 items-end">
-          {NAV_ITEMS.map((item) => {
+      <nav aria-label="Navegación principal" className="app-mobile-nav safe-bottom print-hidden fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 backdrop-blur lg:hidden">
+        <div className={`grid items-end ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'}`}>
+          {navItems.map((item) => {
             const Icon = item.icon;
             if (item.elevated) {
               return (
@@ -155,8 +156,8 @@ export function AppShell() {
                   {({ isActive }) => (
                     <>
                       <span
-                        className={`-mt-5 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg ring-4 ring-white transition-colors ${
-                          isActive ? 'bg-sky-soft' : 'bg-sky'
+                        className={`-mt-4 flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg ring-4 ring-white transition-colors sm:h-14 sm:w-14 ${
+                          isActive ? 'bg-accent-hover' : 'bg-accent'
                         }`}
                       >
                         <Plus className="h-7 w-7" />
@@ -174,13 +175,13 @@ export function AppShell() {
                 key={item.to}
                 to={item.to}
                 end={item.end}
-                className="flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold"
+                className="flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-semibold"
               >
                 {({ isActive }) => (
                   <>
                     <Icon
                       className={`h-5 w-5 ${
-                        isActive ? 'text-sky' : 'text-slate-400'
+                        isActive ? 'text-accent' : 'text-slate-500'
                       }`}
                     />
                     <span className={isActive ? 'text-navy' : 'text-slate-500'}>

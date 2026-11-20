@@ -14,13 +14,17 @@ import { Money } from '../components/Money';
 import { StatusBadge } from '../components/StatusBadge';
 import { EmptyState } from '../components/EmptyState';
 import { Spinner } from '../components/Spinner';
+import { useAuth } from '../context/AuthContext';
 import { fetchAllPayments, fetchInvoices } from '../lib/api';
 import { describeError } from '../lib/errors';
 import {
   MONTHS_SHORT_ES,
+  BUSINESS_CURRENCY,
   formatDate,
   formatInvoiceNumber,
+  formatMoney,
   monthKeyOf,
+  todayISO,
 } from '../lib/format';
 import type { InvoiceBalance, Payment } from '../types/database';
 
@@ -43,7 +47,11 @@ function buildMonthPoints(): { key: string; label: string }[] {
 }
 
 export function DashboardPage() {
+  const { isAdmin } = useAuth();
   const [invoices, setInvoices] = useState<InvoiceBalance[]>([]);
+  const copInvoices = useMemo(() => invoices.filter((invoice) =>
+    invoice.currency_code === BUSINESS_CURRENCY.currency_code && invoice.status !== 'anulada',
+  ), [invoices]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +65,10 @@ export function DashboardPage() {
         fetchAllPayments(),
       ]);
       setInvoices(loadedInvoices);
-      setPayments(loadedPayments);
+      const billedInCop = new Set(loadedInvoices.filter((invoice) =>
+        invoice.currency_code === BUSINESS_CURRENCY.currency_code && invoice.status !== 'anulada',
+      ).map((invoice) => invoice.id));
+      setPayments(loadedPayments.filter((payment) => billedInCop.has(payment.invoice_id)));
     } catch (cause) {
       setError(describeError(cause));
     } finally {
@@ -73,25 +84,25 @@ export function DashboardPage() {
     let billed = 0;
     let collected = 0;
     let outstanding = 0;
-    for (const invoice of invoices) {
+    for (const invoice of copInvoices) {
       billed += Number(invoice.total) || 0;
       collected += Number(invoice.paid_amount) || 0;
       outstanding += Math.max(0, Number(invoice.balance) || 0);
     }
     return {
-      count: invoices.length,
+      count: copInvoices.length,
       billed: Math.round(billed * 100) / 100,
       collected: Math.round(collected * 100) / 100,
       outstanding: Math.round(outstanding * 100) / 100,
     };
-  }, [invoices]);
+  }, [copInvoices]);
 
-  const currentMonthKey = monthKeyOf(new Date().toISOString().slice(0, 10));
+  const currentMonthKey = monthKeyOf(todayISO());
 
   const currentMonth = useMemo(() => {
     let billed = 0;
     let count = 0;
-    for (const invoice of invoices) {
+    for (const invoice of copInvoices) {
       if (monthKeyOf(invoice.issue_date) === currentMonthKey) {
         billed += Number(invoice.total) || 0;
         count += 1;
@@ -108,13 +119,13 @@ export function DashboardPage() {
       collected: Math.round(collected * 100) / 100,
       count,
     };
-  }, [invoices, payments, currentMonthKey]);
+  }, [copInvoices, payments, currentMonthKey]);
 
   const months = useMemo<MonthPoint[]>(() => {
     return buildMonthPoints().map((point) => {
       let billed = 0;
       let collected = 0;
-      for (const invoice of invoices) {
+      for (const invoice of copInvoices) {
         if (monthKeyOf(invoice.issue_date) === point.key) {
           billed += Number(invoice.total) || 0;
         }
@@ -130,19 +141,25 @@ export function DashboardPage() {
         collected: Math.round(collected * 100) / 100,
       };
     });
-  }, [invoices, payments]);
+  }, [copInvoices, payments]);
 
   const chartMax = useMemo(() => {
     const values = months.flatMap((month) => [month.billed, month.collected]);
     return Math.max(1, ...values);
   }, [months]);
 
-  const recentInvoices = useMemo(() => invoices.slice(0, 5), [invoices]);
+  const recentInvoices = useMemo(
+    () =>
+      [...invoices]
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .slice(0, 5),
+    [invoices],
+  );
 
   const outstandingInvoices = useMemo(
     () =>
       [...invoices]
-        .filter((invoice) => Number(invoice.balance) > 0.009)
+        .filter((invoice) => invoice.status !== 'anulada' && Number(invoice.balance) > 0.009)
         .sort((a, b) => a.issue_date.localeCompare(b.issue_date))
         .slice(0, 5),
     [invoices],
@@ -156,7 +173,7 @@ export function DashboardPage() {
   if (loading) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-slate-500">
-        <Spinner className="h-6 w-6 text-sky" />
+        <Spinner className="h-6 w-6 text-accent" />
         <p className="text-sm font-medium">Cargando resumen…</p>
       </div>
     );
@@ -178,13 +195,13 @@ export function DashboardPage() {
     <div>
       <PageHeader
         title="Inicio"
-        subtitle="Resumen de facturación, cobros y saldos pendientes."
-        actions={
+        subtitle="Resumen de facturación, cobros y saldos de facturas vigentes en COP."
+        actions={isAdmin ? (
           <Link to="/facturas/nueva" className="btn btn-accent">
             <Plus className="h-4 w-4" />
             Nueva factura
           </Link>
-        }
+        ) : null}
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -193,9 +210,9 @@ export function DashboardPage() {
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               Facturas emitidas
             </span>
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-light text-sky">
-              <FileText className="h-4 w-4" />
-            </span>
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-light text-accent">
+                <FileText className="h-4 w-4" />
+              </span>
           </div>
           <p className="mt-3 text-2xl font-extrabold text-navy">{metrics.count}</p>
         </div>
@@ -205,13 +222,13 @@ export function DashboardPage() {
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               Total facturado
             </span>
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-light text-sky">
-              <DollarSign className="h-4 w-4" />
-            </span>
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-light text-accent">
+                <DollarSign className="h-4 w-4" />
+              </span>
           </div>
           <Money
             value={metrics.billed}
-            className="mt-3 block truncate text-xl font-extrabold text-navy sm:text-2xl"
+            className="mt-3 block text-lg font-extrabold text-navy sm:text-2xl"
           />
         </div>
 
@@ -226,7 +243,7 @@ export function DashboardPage() {
           </div>
           <Money
             value={metrics.collected}
-            className="mt-3 block truncate text-xl font-extrabold text-emerald-600 sm:text-2xl"
+            className="mt-3 block text-lg font-extrabold text-emerald-600 sm:text-2xl"
           />
         </div>
 
@@ -241,7 +258,7 @@ export function DashboardPage() {
           </div>
           <Money
             value={metrics.outstanding}
-            className="mt-3 block truncate text-xl font-extrabold text-red-600 sm:text-2xl"
+            className="mt-3 block text-lg font-extrabold text-red-600 sm:text-2xl"
           />
         </div>
       </div>
@@ -275,15 +292,15 @@ export function DashboardPage() {
                   <div
                     className="w-2.5 rounded-t bg-navy/90 sm:w-3.5"
                     style={{ height: barHeight(month.billed) }}
-                    title={`Facturado: ${month.billed}`}
+                    title={`Facturado: ${formatMoney(month.billed, '$', 'COP')}`}
                   />
                   <div
                     className="w-2.5 rounded-t bg-sky sm:w-3.5"
                     style={{ height: barHeight(month.collected) }}
-                    title={`Cobrado: ${month.collected}`}
+                    title={`Cobrado: ${formatMoney(month.collected, '$', 'COP')}`}
                   />
                 </div>
-                <span className="mt-2 text-[10px] font-semibold uppercase text-slate-400">
+                <span className="mt-2 text-[10px] font-semibold uppercase text-slate-500">
                   {month.label}
                 </span>
               </div>
@@ -322,7 +339,7 @@ export function DashboardPage() {
             <h2 className="text-sm font-bold text-navy">Facturas recientes</h2>
             <Link
               to="/facturas"
-              className="inline-flex items-center gap-1 text-xs font-semibold text-sky hover:text-sky-soft"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-accent hover:text-accent-hover"
             >
               Ver todas
               <ArrowRight className="h-3.5 w-3.5" />
@@ -335,12 +352,12 @@ export function DashboardPage() {
                 icon={FileText}
                 title="Todavía no hay facturas"
                 description="Crea la primera factura para comenzar a controlar tus ventas."
-                action={
+                action={isAdmin ? (
                   <Link to="/facturas/nueva" className="btn btn-accent btn-sm">
                     <Plus className="h-4 w-4" />
                     Nueva factura
                   </Link>
-                }
+                ) : null}
               />
             ) : (
               <ul className="divide-y divide-line">
@@ -361,6 +378,7 @@ export function DashboardPage() {
                       <div className="flex shrink-0 flex-col items-end gap-1">
                         <Money
                           value={invoice.total}
+                          invoice={invoice}
                           className="text-sm font-bold text-navy"
                         />
                         <StatusBadge status={invoice.status} />
@@ -378,7 +396,7 @@ export function DashboardPage() {
             <h2 className="text-sm font-bold text-navy">Facturas por cobrar</h2>
             <Link
               to="/facturas?estado=pendiente"
-              className="inline-flex items-center gap-1 text-xs font-semibold text-sky hover:text-sky-soft"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-accent hover:text-accent-hover"
             >
               Ver pendientes
               <ArrowRight className="h-3.5 w-3.5" />
@@ -412,6 +430,7 @@ export function DashboardPage() {
                       <div className="flex shrink-0 flex-col items-end gap-1">
                         <Money
                           value={invoice.balance}
+                          invoice={invoice}
                           className="text-sm font-bold text-red-600"
                         />
                         <StatusBadge status={invoice.status} />

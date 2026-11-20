@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Money } from '../components/Money';
+import { useAuth } from '../context/AuthContext';
 import { EmptyState } from '../components/EmptyState';
 import { Spinner } from '../components/Spinner';
 import { Modal } from '../components/Modal';
@@ -26,6 +27,7 @@ import { describeError } from '../lib/errors';
 import type { CustomerSummary } from '../types/database';
 
 export function CustomersPage() {
+  const { isAdmin } = useAuth();
   const { notify } = useToast();
 
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
@@ -153,13 +155,13 @@ export function CustomersPage() {
     <div>
       <PageHeader
         title="Clientes"
-        subtitle="Administra los clientes, sus facturas y saldos pendientes."
-        actions={
+        subtitle="Consulta clientes, facturas y saldos pendientes en COP."
+        actions={isAdmin ? (
           <button type="button" onClick={openCreate} className="btn btn-accent">
             <Plus className="h-4 w-4" />
             Nuevo cliente
           </button>
-        }
+        ) : null}
       />
 
       <div className="card mb-4 p-4">
@@ -207,12 +209,12 @@ export function CustomersPage() {
               ? 'Agrega tu primer cliente o créalo directamente al emitir una factura.'
               : 'Prueba con otro término de búsqueda.'
           }
-          action={
+          action={isAdmin ? (
             <button type="button" onClick={openCreate} className="btn btn-accent btn-sm">
               <Plus className="h-4 w-4" />
               Nuevo cliente
             </button>
-          }
+          ) : null}
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -228,11 +230,11 @@ export function CustomersPage() {
                     {customer.invoice_count === 1 ? 'factura' : 'facturas'}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
+                {isAdmin ? <div className="flex shrink-0 items-center gap-1">
                   <button
                     type="button"
                     onClick={() => openEdit(customer)}
-                    className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-surface hover:text-navy"
+                    className="icon-button inline-flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-surface hover:text-navy"
                     aria-label={`Editar ${customer.name}`}
                   >
                     <Pencil className="h-4 w-4" />
@@ -240,12 +242,12 @@ export function CustomersPage() {
                   <button
                     type="button"
                     onClick={() => setDeleteTarget(customer)}
-                    className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                    className="icon-button inline-flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
                     aria-label={`Eliminar ${customer.name}`}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
-                </div>
+                </div> : null}
               </div>
 
               <div className="mt-3 space-y-1.5 text-xs text-slate-600">

@@ -1,8 +1,9 @@
 import ExcelJS from 'exceljs';
 import type { Borders, Fill } from 'exceljs';
 import { downloadBlob } from '../download';
-import { capitalize, formatDate, todayISO } from '../format';
-import type { InvoiceBalance, Settings } from '../../types/database';
+import { BUSINESS_CURRENCY, capitalize, formatDate, invoiceCurrency, todayISO } from '../format';
+import { excelCurrencyFormat } from './currencyFormat';
+import type { InvoiceBalance } from '../../types/database';
 
 const NAVY = 'FF0B2340';
 const WHITE = 'FFFFFFFF';
@@ -18,14 +19,8 @@ function solidFill(argb: string): Fill {
   return { type: 'pattern', pattern: 'solid', fgColor: { argb } };
 }
 
-function moneyFormat(symbol: string): string {
-  const safe = (symbol || '$').replace(/"/g, '').trim() || '$';
-  return `"${safe}"#,##0.00`;
-}
-
 export async function downloadInvoicesExcel(
   invoices: InvoiceBalance[],
-  settings: Settings,
 ): Promise<void> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Control de Ventas';
@@ -72,7 +67,7 @@ export async function downloadInvoicesExcel(
   });
   header.height = 24;
 
-  const currency = moneyFormat(settings.currency_symbol);
+  const copFormat = excelCurrencyFormat(BUSINESS_CURRENCY);
 
   let rowIndex = 2;
   let totalBilled = 0;
@@ -80,6 +75,7 @@ export async function downloadInvoicesExcel(
   let totalBalance = 0;
 
   for (const invoice of invoices) {
+    const currency = excelCurrencyFormat(invoiceCurrency(invoice));
     const row = sheet.getRow(rowIndex);
     row.getCell(1).value = Number(invoice.number);
     row.getCell(1).numFmt = '0000';
@@ -108,24 +104,26 @@ export async function downloadInvoicesExcel(
     }
 
     row.height = 20;
-    totalBilled += Number(invoice.total) || 0;
-    totalPaid += Number(invoice.paid_amount) || 0;
-    totalBalance += Number(invoice.balance) || 0;
+    if (invoice.currency_code === BUSINESS_CURRENCY.currency_code && invoice.status !== 'anulada') {
+      totalBilled += Number(invoice.total) || 0;
+      totalPaid += Number(invoice.paid_amount) || 0;
+      totalBalance += Number(invoice.balance) || 0;
+    }
     rowIndex += 1;
   }
 
   const totalsRow = sheet.getRow(rowIndex);
   sheet.mergeCells(rowIndex, 1, rowIndex, 3);
-  totalsRow.getCell(1).value = 'TOTALES';
+  totalsRow.getCell(1).value = 'TOTALES VIGENTES EN COP';
   totalsRow.getCell(1).font = { bold: true, color: { argb: NAVY }, size: 11 };
   totalsRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
 
   totalsRow.getCell(4).value = Math.round(totalBilled * 100) / 100;
   totalsRow.getCell(5).value = Math.round(totalPaid * 100) / 100;
   totalsRow.getCell(6).value = Math.round(totalBalance * 100) / 100;
-  totalsRow.getCell(4).numFmt = currency;
-  totalsRow.getCell(5).numFmt = currency;
-  totalsRow.getCell(6).numFmt = currency;
+  totalsRow.getCell(4).numFmt = copFormat;
+  totalsRow.getCell(5).numFmt = copFormat;
+  totalsRow.getCell(6).numFmt = copFormat;
   totalsRow.getCell(4).alignment = { horizontal: 'right' };
   totalsRow.getCell(5).alignment = { horizontal: 'right' };
   totalsRow.getCell(6).alignment = { horizontal: 'right' };

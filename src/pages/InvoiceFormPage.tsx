@@ -6,16 +6,15 @@ import { Money } from '../components/Money';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../context/ToastContext';
 import {
-  createCustomer,
   createInvoice,
-  deleteCustomer,
   fetchCustomers,
   fetchInvoice,
   fetchInvoiceItems,
+  InvoiceRefetchError,
   updateInvoice,
 } from '../lib/api';
 import { describeError } from '../lib/errors';
-import { todayISO } from '../lib/format';
+import { BUSINESS_CURRENCY, invoiceCurrency, parseDecimal, roundMoney } from '../lib/format';
 import type {
   CustomerSummary,
   InvoiceFormData,
@@ -62,20 +61,22 @@ function draftFromItem(item: InvoiceItem): ItemDraft {
   draftCounter += 1;
   return {
     key: `item-${draftCounter}`,
-    quantity: String(Number(item.quantity)),
+    quantity: String(Number(item.quantity)).replace('.', ','),
     description: item.description,
     unit: item.unit,
-    unit_price: String(Number(item.unit_price)),
+    unit_price: String(Number(item.unit_price)).replace('.', ','),
   };
 }
 
-function parseDecimal(value: string): number {
-  const parsed = Number(value.replace(',', '.'));
-  return Number.isFinite(parsed) ? parsed : 0;
+function todayISO(): string {
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
 }
 
-function roundMoney(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+function roundQuantity(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 export function InvoiceFormPage() {
@@ -85,6 +86,7 @@ export function InvoiceFormPage() {
   const { notify } = useToast();
 
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+  const [currency, setCurrency] = useState<{ currency_code: string; currency_symbol: string }>(BUSINESS_CURRENCY);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [customerMode, setCustomerMode] = useState<'existing' | 'new'>('new');
@@ -110,6 +112,8 @@ export function InvoiceFormPage() {
           fetchInvoice(id),
           fetchInvoiceItems(id),
         ]);
+        if (invoice.status === 'anulada') throw new Error('La factura está anulada.');
+        setCurrency(invoiceCurrency(invoice));
         const hasCustomer =
           Boolean(invoice.customer_id) &&
           loadedCustomers.some((customer) => customer.id === invoice.customer_id);
@@ -126,6 +130,7 @@ export function InvoiceFormPage() {
             : [createDraft()],
         );
       } else {
+        setCurrency(BUSINESS_CURRENCY);
         setCustomerMode('new');
         setCustomerId('');
         setCustomerName('');
@@ -201,7 +206,9 @@ export function InvoiceFormPage() {
     for (const item of items) {
       const quantity = parseDecimal(item.quantity);
       const price = parseDecimal(item.unit_price);
-      total += quantity * price;
+      if (Number.isFinite(quantity) && Number.isFinite(price)) {
+        total += roundMoney(roundQuantity(quantity) * roundMoney(price));
+      }
     }
     return roundMoney(total);
   }, [items]);
@@ -248,7 +255,7 @@ export function InvoiceFormPage() {
         setFormError('Todos los artículos deben tener una descripción.');
         return;
       }
-      const quantity = parseDecimal(item.quantity);
+      const quantity = roundQuantity(parseDecimal(item.quantity));
       if (!Number.isFinite(quantity) || quantity <= 0) {
         setFormError(`La cantidad de "${description}" debe ser mayor a cero.`);
         return;
@@ -267,27 +274,34 @@ export function InvoiceFormPage() {
     }
 
     setSaving(true);
-    let createdCustomerId: string | null = null;
     try {
       let resolvedCustomerId: string | null =
         customerMode === 'existing' ? customerId || null : null;
+      let resolvedCustomerName = customerName.trim();
+      let resolvedCustomerAddress = customerAddress.trim() || null;
+      let resolvedCustomerPhone = customerPhone.trim() || null;
 
       if (customerMode === 'new') {
-        const created = await createCustomer({
-          name: customerName.trim(),
-          address: customerAddress.trim() || null,
-          phone: customerPhone.trim() || null,
-          notes: null,
-        });
-        createdCustomerId = created.id;
-        resolvedCustomerId = created.id;
+        const normalizedName = resolvedCustomerName.toLowerCase();
+        const existing = customers.find(
+          (customer) => customer.name.trim().toLowerCase() === normalizedName,
+        );
+
+        if (existing) {
+          resolvedCustomerId = existing.id;
+          resolvedCustomerName = existing.name;
+          resolvedCustomerAddress = existing.address;
+          resolvedCustomerPhone = existing.phone;
+          setCustomerId(existing.id);
+        }
       }
 
       const payload: InvoiceFormData = {
         customer_id: resolvedCustomerId,
-        customer_name: customerName.trim(),
-        customer_address: customerAddress.trim() || null,
-        customer_phone: customerPhone.trim() || null,
+        create_customer: customerMode === 'new' && resolvedCustomerId === null,
+        customer_name: resolvedCustomerName,
+        customer_address: resolvedCustomerAddress,
+        customer_phone: resolvedCustomerPhone,
         issue_date: issueDate,
         notes: notes.trim() || null,
         items: payloadItems,
@@ -300,13 +314,11 @@ export function InvoiceFormPage() {
       notify(isEdit ? 'Factura actualizada.' : 'Factura creada.', 'success');
       navigate(`/facturas/${saved.id}`, { replace: true });
     } catch (cause) {
-      if (createdCustomerId) {
-        try {
-          await deleteCustomer(createdCustomerId);
-        } catch {
-          setFormError(describeError(cause));
-          return;
-        }
+      // La factura ya se creó: navegar al detalle en lugar de arriesgar un duplicado.
+      if (cause instanceof InvoiceRefetchError) {
+        notify('Factura creada. Abriendo el detalle…', 'success');
+        navigate(`/facturas/${cause.invoiceId}`, { replace: true });
+        return;
       }
       setFormError(describeError(cause));
     } finally {
@@ -368,7 +380,7 @@ export function InvoiceFormPage() {
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
+        <div className="min-w-0 space-y-4 lg:col-span-2">
           <section className="card p-4 sm:p-5">
             <h2 className="text-sm font-bold text-navy">Datos del cliente</h2>
 
@@ -514,15 +526,15 @@ export function InvoiceFormPage() {
                       <button
                         type="button"
                         onClick={() => removeItem(item.key)}
-                        className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                        className="icon-button inline-flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
                         aria-label={`Eliminar artículo ${index + 1}`}
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-12">
-                      <div className="sm:col-span-2">
+                    <div className="grid grid-cols-2 gap-2 xl:grid-cols-12">
+                      <div className="xl:col-span-2">
                         <label className="label" htmlFor={`${item.key}-qty`}>
                           Cantidad
                         </label>
@@ -540,7 +552,7 @@ export function InvoiceFormPage() {
                           placeholder="0"
                         />
                       </div>
-                      <div className="col-span-2 sm:col-span-4">
+                      <div className="xl:col-span-4">
                         <label className="label" htmlFor={`${item.key}-desc`}>
                           Descripción
                         </label>
@@ -555,7 +567,7 @@ export function InvoiceFormPage() {
                           placeholder="Descripción del artículo"
                         />
                       </div>
-                      <div className="sm:col-span-2">
+                      <div className="xl:col-span-2">
                         <label className="label" htmlFor={`${item.key}-unit`}>
                           Unidad
                         </label>
@@ -571,7 +583,7 @@ export function InvoiceFormPage() {
                           placeholder="unidad"
                         />
                       </div>
-                      <div className="sm:col-span-2">
+                      <div className="xl:col-span-2">
                         <label className="label" htmlFor={`${item.key}-price`}>
                           Precio unit.
                         </label>
@@ -586,13 +598,13 @@ export function InvoiceFormPage() {
                             updateItem(item.key, 'unit_price', event.target.value)
                           }
                           className="input"
-                          placeholder="0.00"
+                          placeholder="0,00"
                         />
                       </div>
-                      <div className="col-span-2 sm:col-span-2">
+                      <div className="col-span-2 xl:col-span-2">
                         <span className="label">Total</span>
-                        <div className="flex h-[42px] items-center justify-end rounded-xl bg-surface px-3 text-sm font-bold text-navy">
-                          <Money value={lineTotal} />
+                        <div className="flex min-h-[42px] items-center justify-end rounded-xl bg-surface px-3 py-2 text-right text-sm font-bold text-navy">
+                          <Money value={lineTotal} invoice={currency} />
                         </div>
                       </div>
                     </div>
@@ -635,7 +647,7 @@ export function InvoiceFormPage() {
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-500">Cliente</span>
-                <span className="max-w-[60%] truncate text-right font-semibold text-navy">
+                <span className="max-w-[60%] break-words text-right font-semibold text-navy">
                   {customerName.trim() || 'Sin definir'}
                 </span>
               </div>
@@ -647,9 +659,9 @@ export function InvoiceFormPage() {
               </div>
             </div>
 
-            <div className="mt-4 flex items-center justify-between rounded-xl bg-navy px-4 py-3 text-white">
+            <div className="mt-4 flex items-center justify-between gap-2 rounded-xl bg-navy px-4 py-3 text-white">
               <span className="text-xs font-semibold uppercase tracking-wide">Total</span>
-              <Money value={itemsTotal} className="text-lg font-extrabold" />
+              <Money value={itemsTotal} invoice={currency} className="text-right text-lg font-extrabold" />
             </div>
 
             <div className="mt-4 space-y-2">

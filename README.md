@@ -32,36 +32,60 @@ cmd /c npm install
    proyecto nuevo.
 2. Espera a que termine la preparación de la base de datos.
 
-## 3. Ejecutar el esquema
+## 3. Instalar o actualizar el esquema
 
-1. En el proyecto de Supabase abre **SQL Editor**.
-2. Crea una consulta nueva, copia el contenido completo de
-   `supabase/schema.sql` y ejecútalo una sola vez.
-3. Verifica en **Table Editor** que existan las tablas `settings`, `customers`,
+Antes de ejecutar la migración, verificá que el registro público esté
+desactivado según el paso 4. Toda cuenta con sesión puede leer los datos.
+
+1. Si la base ya tiene datos, verificá que haya una copia restaurable y revisá
+   qué cuentas tienen acceso. El esquema original asignaba rol administrador
+   por defecto y la actualización conserva los roles existentes. La
+   configuración de moneda previa se registra en las facturas históricas
+   como referencia. Si se usaron distintas monedas a lo largo del tiempo,
+   verificá las facturas contra sus comprobantes.
+2. Para un proyecto que se administra desde **SQL Editor**, creá una consulta y
+   ejecutá completo `supabase/migrations/20261119000000_control_hardening.sql`.
+   Para un proyecto gestionado con migraciones, aplicá ese archivo con el flujo
+   de migraciones del proyecto. El mismo archivo sirve para una base nueva y
+   para actualizar el esquema anterior.
+3. Verificá que existan las tablas `profiles`, `settings`, `customers`,
    `invoices`, `invoice_items`, `payments` y la vista `invoice_balances`.
+   Publicá la versión del frontend junto con la migración para usar las nuevas
+   operaciones de anulación.
 
-El esquema crea la secuencia de numeración de facturas, los disparadores que
-recalculan totales, la vista con pagos/saldo/estado y las políticas RLS.
+## 4. Seguridad: desactivar el registro público y crear el primer usuario
 
-## 4. Crear el primer usuario
+> **Importante:** desactivá el registro público antes de crear el primer usuario
+> y antes de publicar la aplicación. Toda cuenta con sesión puede leer los
+> datos del negocio.
 
-La aplicación no tiene registro público. El primer usuario se crea desde
-Supabase:
-
-1. Ve a **Authentication → Users**.
-2. Pulsa **Add user**.
+1. En Supabase ve a **Authentication → Providers → Email** y **desactiva**
+   **Allow new users to sign up**.
+2. Luego ve a **Authentication → Users** y pulsa **Add user**.
 3. Ingresa correo y contraseña.
-4. Marca la opción para confirmar el correo automáticamente (Auto Confirm).
+4. Marca la opción para confirmar el correo automáticamente (**Auto Confirm**).
 
-Con ese usuario podrás iniciar sesión en la aplicación. Los usuarios siguientes
-se crean de la misma forma.
+En una base nueva, el **primer** usuario creado se convierte automáticamente
+en administrador. Las siguientes cuentas nacen pendientes y tienen acceso de
+lectura, al igual que el rol lector. Un administrador puede cambiar su rol en
+**Ajustes**. Solo los administradores pueden registrar y modificar datos del
+negocio. Creá las cuentas desde el panel de Supabase.
+
+Si todas las cuentas existían antes de instalar el esquema y ninguna tiene rol
+de administrador, usá una sesión de propietario en **SQL Editor** para
+asignar el rol `admin` al perfil cuyo identificador hayas verificado en
+**Authentication → Users**. Los perfiles faltantes se completan como
+pendientes durante la migración.
 
 ## 5. Configurar las variables de entorno
 
 1. En la raíz del proyecto copia `.env.example` como `.env`.
-2. En Supabase ve a **Settings → API** y copia:
+2. En Supabase ve a **Project Settings → API** y copia:
    - **Project URL** → `VITE_SUPABASE_URL`
    - **anon public key** → `VITE_SUPABASE_ANON_KEY`
+
+   La **anon public key** es el JWT largo que empieza con `eyJ…`. **No** es la
+   contraseña de la base de datos ni la `service_role` key.
 
 ```env
 VITE_SUPABASE_URL=https://tu-proyecto.supabase.co
@@ -101,6 +125,7 @@ Comandos disponibles:
 4. En **Site configuration → Environment variables** agrega:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
+   - `NODE_VERSION` = `20`
 5. Ejecuta el despliegue.
 
 ### Opción B: despliegue manual
@@ -143,17 +168,16 @@ control/
 │  │  └─ pdf/                 Factura PDF (react-pdf)
 │  ├─ pages/                  Pantallas de la aplicación
 │  └─ types/database.ts       Tipos del esquema
-├─ supabase/schema.sql        Esquema completo de base de datos
+├─ supabase/migrations/       Esquema versionado de la base de datos
 ├─ netlify.toml               Configuración de despliegue y SPA
 └─ vite.config.ts             Configuración de Vite y PWA
 ```
 
 ## Solución de problemas
 
-### "No se encontró el esquema. Ejecuta supabase/schema.sql en Supabase."
+### No se encontró el esquema de Supabase
 
-El proyecto no tiene las tablas o la vista. Ejecuta el archivo
-`supabase/schema.sql` completo en el SQL Editor de Supabase y recarga la página.
+Verificá que se haya aplicado la migración del paso 3 y recargá la página.
 
 ### El inicio de sesión falla
 
@@ -184,7 +208,23 @@ El service worker de la PWA puede mantener archivos en caché. Recarga la págin
 con `Ctrl + F5` o cierra y vuelve a abrir la aplicación instalada. Los nuevos
 despliegues se activan automáticamente al recargar.
 
-### Necesito cambiar la moneda
+### Moneda de facturación
 
-Ve a **Ajustes → Datos del negocio** y actualiza el código y el símbolo de la
-moneda. El formato se aplica a toda la aplicación, al PDF y al Excel.
+Las facturas nuevas se registran en pesos colombianos (COP). La migración
+conserva los importes de las facturas y abonos previos, y usa la configuración
+de moneda de la base previa para presentar las facturas históricas.
+
+## Pruebas de base de datos
+
+Usá PostgreSQL 17 en una instancia local o descartable con un usuario que
+pueda crear bases y roles. Los comandos prueban una instalación nueva y una
+actualización desde el esquema original en dos bases vacías.
+
+```bash
+createdb control_test_fresh
+psql -X -d control_test_fresh -f supabase/tests/control_hardening.sql
+
+git show c78b4d8:supabase/schema.sql > control_test_legacy.sql
+createdb control_test_upgrade
+psql -X -d control_test_upgrade -v legacy_schema=control_test_legacy.sql -f supabase/tests/control_hardening.sql
+```

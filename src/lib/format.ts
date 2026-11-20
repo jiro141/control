@@ -28,12 +28,12 @@ export const MONTHS_LONG_ES = [
   'diciembre',
 ];
 
-const numberFormatter = new Intl.NumberFormat('en-US', {
+const numberFormatter = new Intl.NumberFormat('es-CO', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
 
-const quantityFormatter = new Intl.NumberFormat('en-US', {
+const quantityFormatter = new Intl.NumberFormat('es-CO', {
   minimumFractionDigits: 0,
   maximumFractionDigits: 3,
 });
@@ -44,17 +44,45 @@ export function toNumber(value: number | string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+export function parseDecimal(value: string | number | null | undefined): number {
+  if (value === null || value === undefined) return NaN;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : NaN;
+  const cleaned = value.trim().replace(/\s/g, '');
+  // In es-CO a dot followed by exactly three digits is a grouping separator.
+  if (/^[+-]?\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(cleaned)) {
+    return Number(cleaned.replace(/\./g, '').replace(',', '.'));
+  }
+  if (/^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(cleaned)) {
+    return Number(cleaned.replace(',', '.'));
+  }
+  if (/^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(cleaned)) {
+    return Number(cleaned.replace(/,/g, ''));
+  }
+  return NaN;
+}
+
 export function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+export const BUSINESS_CURRENCY = { currency_code: 'COP', currency_symbol: '$' } as const;
+
+export function invoiceCurrency(invoice?: { currency_code?: string; currency_symbol?: string } | null) {
+  return {
+    currency_code: invoice?.currency_code || BUSINESS_CURRENCY.currency_code,
+    currency_symbol: invoice?.currency_symbol || BUSINESS_CURRENCY.currency_symbol,
+  };
+}
+
 export function formatMoney(
   value: number | string | null | undefined,
-  symbol = '$',
+  symbol: string = BUSINESS_CURRENCY.currency_symbol,
+  code?: string,
 ): string {
   const amount = toNumber(value);
   const sign = amount < 0 ? '-' : '';
-  return `${sign}${symbol}${numberFormatter.format(Math.abs(amount))}`;
+  const formatted = `${sign}${symbol}${numberFormatter.format(Math.abs(amount))}`;
+  return code ? `${formatted} ${code}` : formatted;
 }
 
 export function formatQuantity(value: number | string | null | undefined): string {

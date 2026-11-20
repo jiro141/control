@@ -6,15 +6,17 @@ import { describeError } from '../lib/errors';
 import { Spinner } from '../components/Spinner';
 
 interface LocationState {
-  from?: { pathname?: string };
+  from?: { pathname?: string; search?: string; hash?: string };
 }
 
 export function LoginPage() {
   const { session, signIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from =
-    (location.state as LocationState | null)?.from?.pathname ?? '/';
+  const redirectTarget = (location.state as LocationState | null)?.from;
+  const from = redirectTarget?.pathname
+    ? `${redirectTarget.pathname}${redirectTarget.search ?? ''}${redirectTarget.hash ?? ''}`
+    : '/';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -84,7 +86,7 @@ export function LoginPage() {
         </div>
       </aside>
 
-      <div className="flex min-h-screen flex-col">
+      <div className="safe-top safe-bottom flex min-h-screen flex-col supports-[height:100dvh]:min-h-dvh">
         <div className="lg:hidden">
           <img
             src="/assets/header-banner.png"
@@ -93,7 +95,7 @@ export function LoginPage() {
           />
         </div>
 
-        <div className="flex flex-1 items-center justify-center px-4 py-8 sm:px-6">
+        <div className="safe-inline flex flex-1 items-center justify-center py-8 sm:px-6">
           <div className="w-full max-w-md">
             <div className="mb-6 flex items-center gap-3 lg:hidden">
               <img
@@ -119,7 +121,7 @@ export function LoginPage() {
                     Correo electrónico
                   </label>
                   <div className="relative">
-                    <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                     <input
                       id="login-email"
                       type="email"
@@ -138,21 +140,21 @@ export function LoginPage() {
                     Contraseña
                   </label>
                   <div className="relative">
-                    <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                     <input
                       id="login-password"
                       type={showPassword ? 'text' : 'password'}
                       autoComplete="current-password"
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      className="input pl-9 pr-11"
+                      className="input pl-9 pr-14"
                       placeholder="Tu contraseña"
                       disabled={loading}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword((current) => !current)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-400 transition-colors hover:text-navy"
+                      className="icon-button absolute right-1 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded-lg p-1.5 text-slate-500 transition-colors hover:text-navy"
                       aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                     >
                       {showPassword ? (
@@ -180,7 +182,7 @@ export function LoginPage() {
                 </button>
               </form>
 
-              <p className="mt-5 text-center text-xs leading-relaxed text-slate-400">
+              <p className="mt-5 text-center text-xs leading-relaxed text-slate-500">
                 El primer usuario se crea desde Supabase: Authentication → Users.
               </p>
             </div>

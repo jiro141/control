@@ -1,4 +1,6 @@
-export type InvoiceStatus = 'pendiente' | 'parcial' | 'pagada';
+export type InvoiceStatus = 'pendiente' | 'parcial' | 'pagada' | 'anulada';
+
+export type ProfileRole = 'admin' | 'viewer' | 'pending';
 
 export type PaymentMethod =
   | 'efectivo'
@@ -10,7 +12,7 @@ export type PaymentMethod =
 export interface Profile {
   id: string;
   full_name: string | null;
-  role: string;
+  role: ProfileRole;
   created_at: string;
 }
 
@@ -51,6 +53,9 @@ export interface Invoice {
   issue_date: string;
   notes: string | null;
   total: number;
+  currency_code: string;
+  currency_symbol: string;
+  voided_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -81,6 +86,7 @@ export interface Payment {
   method: string;
   note: string | null;
   created_at: string;
+  voided_at: string | null;
 }
 
 export interface InvoiceInputItem {
@@ -92,6 +98,7 @@ export interface InvoiceInputItem {
 
 export interface InvoiceFormData {
   customer_id: string | null;
+  create_customer: boolean;
   customer_name: string;
   customer_address: string | null;
   customer_phone: string | null;
@@ -115,4 +122,4 @@ export interface PaymentInput {
   note: string | null;
 }
 
-export type SettingsInput = Omit<Settings, 'id' | 'updated_at'>;
+export type SettingsInput = Omit<Settings, 'id' | 'updated_at' | 'currency_code' | 'currency_symbol'>;

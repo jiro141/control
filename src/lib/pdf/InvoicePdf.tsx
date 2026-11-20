@@ -13,6 +13,7 @@ import {
   formatInvoiceNumber,
   formatMoney,
   formatQuantity,
+  invoiceCurrency,
   sanitizeFileName,
 } from '../format';
 import { downloadBlob } from '../download';
@@ -23,8 +24,14 @@ const SKY = '#3FA9E0';
 const BLUE = '#1E5AA8';
 const SLATE = '#475569';
 
+// A4 mide 595×842 pt y la página usa 22 pt de padding, así que el área útil es
+// de ~551×798 pt. Una fila puede crecer hasta 2 líneas (≈24 pt con
+// `maxLines: 2`). En la primera página el banner, fecha, título y bloque del
+// cliente ocupan ~300 pt; con 14 filas de 24 pt quedan ~160 pt para total, nota
+// y pie. En páginas siguientes 22 filas de 24 pt más el encabezado de
+// continuación dejan margen suficiente para que TOTAL y firma no se solapen.
 const FIRST_PAGE_ROWS = 14;
-const NEXT_PAGE_ROWS = 24;
+const NEXT_PAGE_ROWS = 22;
 
 const styles = StyleSheet.create({
   page: {
@@ -109,6 +116,17 @@ const styles = StyleSheet.create({
     paddingBottom: 1,
     fontSize: 8,
   },
+  clientValueWrap: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    borderBottomWidth: 0.8,
+    borderBottomColor: BLUE,
+    paddingBottom: 1,
+    fontSize: 8,
+    maxLines: 2,
+    textOverflow: 'ellipsis',
+  },
   clientAddress: {
     flexGrow: 1,
     marginRight: 12,
@@ -136,8 +154,7 @@ const styles = StyleSheet.create({
   },
   tr: {
     flexDirection: 'row',
-    height: 21,
-    overflow: 'hidden',
+    minHeight: 21,
   },
   td: {
     borderWidth: 0.5,
@@ -146,6 +163,10 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     paddingHorizontal: 4,
     lineHeight: 1.15,
+  },
+  tdDescription: {
+    maxLines: 2,
+    textOverflow: 'ellipsis',
   },
   tdRight: {
     textAlign: 'right',
@@ -270,7 +291,8 @@ function buildChunks(items: InvoiceItem[]): InvoiceItem[][] {
 function InvoicePdf({ invoice, items, settings, bannerUrl }: InvoicePdfProps) {
   const chunks = buildChunks(items);
   const number = formatInvoiceNumber(invoice.number);
-  const symbol = settings.currency_symbol || '$';
+  const { currency_symbol: symbol, currency_code: code } = invoiceCurrency(invoice);
+  const numberLabel = `N° ${number}${invoice.status === 'anulada' ? ' · ANULADA' : ''}`;
 
   return (
     <Document
@@ -294,7 +316,7 @@ function InvoicePdf({ invoice, items, settings, bannerUrl }: InvoicePdfProps) {
                 <View style={styles.fechaRow}>
                   <Text style={styles.fechaLabel}>FECHA</Text>
                   <Text style={styles.fechaValue}>{formatDate(invoice.issue_date)}</Text>
-                  <Text style={styles.number}>N° {number}</Text>
+                  <Text style={styles.number}>{numberLabel}</Text>
                 </View>
                 <View style={styles.titleRow}>
                   <View style={styles.titleRule} />
@@ -309,7 +331,7 @@ function InvoicePdf({ invoice, items, settings, bannerUrl }: InvoicePdfProps) {
                   <View style={styles.clientRowSplit}>
                     <View style={{ flexDirection: 'row', flexGrow: 1, marginRight: 12 }}>
                       <Text style={styles.clientLabel}>DIRECCIÓN:</Text>
-                      <Text style={styles.clientValue} wrap={false}>
+                      <Text style={styles.clientValueWrap}>
                         {invoice.customer_address || ' '}
                       </Text>
                     </View>
@@ -327,7 +349,7 @@ function InvoicePdf({ invoice, items, settings, bannerUrl }: InvoicePdfProps) {
                   <Text style={styles.continuationSub}>{settings.business_name}</Text>
                 </View>
                 <View>
-                  <Text style={styles.continuationMeta}>N° {number}</Text>
+                  <Text style={styles.continuationMeta}>{numberLabel}</Text>
                   <Text style={styles.continuationMeta}>
                     Página {pageIndex + 1} de {chunks.length}
                   </Text>
@@ -349,7 +371,9 @@ function InvoicePdf({ invoice, items, settings, bannerUrl }: InvoicePdfProps) {
                     <Text style={[styles.td, styles.colQty, styles.tdRight]}>
                       {formatQuantity(item.quantity)}
                     </Text>
-                    <Text style={[styles.td, styles.colDesc]}>{item.description}</Text>
+                    <Text style={[styles.td, styles.colDesc, styles.tdDescription]}>
+                      {item.description}
+                    </Text>
                     <Text style={[styles.td, styles.colUnit, styles.tdCenter]}>
                       {item.unit}
                     </Text>
@@ -374,7 +398,7 @@ function InvoicePdf({ invoice, items, settings, bannerUrl }: InvoicePdfProps) {
                   <View style={styles.totalBox}>
                     <Text style={styles.totalLabel}>TOTAL</Text>
                     <Text style={styles.totalValue}>
-                      {formatMoney(invoice.total, symbol)}
+                      {formatMoney(invoice.total, symbol, code)}
                     </Text>
                   </View>
                 </View>
@@ -389,6 +413,12 @@ function InvoicePdf({ invoice, items, settings, bannerUrl }: InvoicePdfProps) {
                       <View style={styles.footerLine}>
                         <View style={styles.bullet} />
                         <Text style={styles.footerText}>{settings.address}</Text>
+                      </View>
+                    ) : null}
+                    {settings.tax_id ? (
+                      <View style={styles.footerLine}>
+                        <View style={styles.bullet} />
+                        <Text style={styles.footerText}>RIF: {settings.tax_id}</Text>
                       </View>
                     ) : null}
                     <View style={styles.footerLine}>

@@ -1,14 +1,16 @@
-import { useSettings } from '../context/SettingsContext';
-import { formatMoney } from '../lib/format';
+import { formatMoney, invoiceCurrency } from '../lib/format';
 
 interface MoneyProps {
   value: number | string | null | undefined;
   className?: string;
-  symbol?: string;
+  invoice?: { currency_code: string; currency_symbol: string };
 }
 
-export function Money({ value, className, symbol }: MoneyProps) {
-  const { settings } = useSettings();
-  const resolvedSymbol = symbol ?? settings?.currency_symbol ?? '$';
-  return <span className={className}>{formatMoney(value, resolvedSymbol)}</span>;
+export function Money({ value, className, invoice }: MoneyProps) {
+  const { currency_symbol, currency_code } = invoiceCurrency(invoice);
+  return (
+    <span className={`money-amount ${className ?? ''}`}>
+      {formatMoney(value, currency_symbol, currency_code)}
+    </span>
+  );
 }

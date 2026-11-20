@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useToast } from '../context/ToastContext';
 import { addPayment } from '../lib/api';
 import { describeError } from '../lib/errors';
-import { todayISO } from '../lib/format';
+import { parseDecimal, roundMoney, todayISO } from '../lib/format';
 import type { InvoiceBalance, PaymentMethod } from '../types/database';
 import { Modal } from './Modal';
 import { Spinner } from './Spinner';
@@ -36,7 +36,7 @@ export function PaymentModal({ open, invoice, onClose, onSaved }: PaymentModalPr
 
   useEffect(() => {
     if (!open) return;
-    setAmount(balance > 0 ? balance.toFixed(2) : '');
+    setAmount(balance > 0 ? balance.toFixed(2).replace('.', ',') : '');
     setMethod('efectivo');
     setPaidAt(todayISO());
     setNote('');
@@ -45,13 +45,17 @@ export function PaymentModal({ open, invoice, onClose, onSaved }: PaymentModalPr
   }, [open, invoice.id, balance]);
 
   const handleSubmit = async () => {
-    const parsed = Number(amount);
+    const parsed = roundMoney(parseDecimal(amount));
     if (!Number.isFinite(parsed) || parsed <= 0) {
       setError('Ingresa un monto mayor a cero.');
       return;
     }
-    if (parsed > balance + 0.01) {
+    if (parsed > balance) {
       setError('El monto no puede superar el saldo pendiente.');
+      return;
+    }
+    if (!paidAt) {
+      setError('Selecciona la fecha del pago.');
       return;
     }
 
@@ -60,7 +64,7 @@ export function PaymentModal({ open, invoice, onClose, onSaved }: PaymentModalPr
     try {
       await addPayment({
         invoice_id: invoice.id,
-        amount: Math.round(parsed * 100) / 100,
+        amount: parsed,
         paid_at: paidAt,
         method,
         note: note.trim() ? note.trim() : null,
@@ -112,7 +116,7 @@ export function PaymentModal({ open, invoice, onClose, onSaved }: PaymentModalPr
           </div>
           <div className="mt-1 flex items-center justify-between">
             <span className="text-slate-500">Saldo pendiente</span>
-            <Money value={balance} className="font-bold text-navy" />
+            <Money value={balance} invoice={invoice} className="font-bold text-navy" />
           </div>
         </div>
 
@@ -122,14 +126,12 @@ export function PaymentModal({ open, invoice, onClose, onSaved }: PaymentModalPr
           </label>
           <input
             id="payment-amount"
-            type="number"
+            type="text"
             inputMode="decimal"
-            min="0"
-            step="0.01"
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
             className="input"
-            placeholder="0.00"
+            placeholder="0,00"
           />
         </div>
 

@@ -15,6 +15,8 @@ interface AuthContextValue {
   session: Session | null;
   user: User | null;
   loading: boolean;
+  isAdmin: boolean;
+  profileLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
@@ -25,6 +27,37 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState<boolean>(isSupabaseConfigured);
+  const userId = session?.user.id;
+  const [profile, setProfile] = useState<{ userId: string; isAdmin: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!userId) {
+      setProfile(null);
+      return;
+    }
+
+    let active = true;
+    let request = 0;
+    const refreshProfile = async () => {
+      const current = ++request;
+      try {
+        const { data, error } = await supabase.from('profiles')
+          .select('role').eq('id', userId).maybeSingle();
+        if (active && request === current) {
+          setProfile({ userId, isAdmin: !error && data?.role === 'admin' });
+        }
+      } catch {
+        if (active && request === current) setProfile({ userId, isAdmin: false });
+      }
+    };
+
+    void refreshProfile();
+    window.addEventListener('focus', refreshProfile);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refreshProfile);
+    };
+  }, [userId]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -80,11 +113,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       user: session?.user ?? null,
       loading,
+      isAdmin: Boolean(userId && profile?.userId === userId && profile.isAdmin),
+      profileLoading: Boolean(userId && profile?.userId !== userId),
       signIn,
       signOut,
       updatePassword,
     }),
-    [session, loading, signIn, signOut, updatePassword],
+    [session, loading, profile, userId, signIn, signOut, updatePassword],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

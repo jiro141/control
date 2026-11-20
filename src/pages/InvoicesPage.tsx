@@ -13,12 +13,12 @@ import { Money } from '../components/Money';
 import { StatusBadge } from '../components/StatusBadge';
 import { EmptyState } from '../components/EmptyState';
 import { Spinner } from '../components/Spinner';
-import { useSettings } from '../context/SettingsContext';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { fetchInvoices } from '../lib/api';
 import { describeError } from '../lib/errors';
-import { downloadInvoicesExcel } from '../lib/excel/invoicesListExcel';
 import {
+  BUSINESS_CURRENCY,
   formatDate,
   formatInvoiceNumber,
   formatMonthKey,
@@ -33,25 +33,35 @@ const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'pendiente', label: 'Pendiente' },
   { value: 'parcial', label: 'Parcial' },
   { value: 'pagada', label: 'Pagada' },
+  { value: 'anulada', label: 'Anulada' },
 ];
 
 function isValidStatus(value: string | null): value is InvoiceStatus {
-  return value === 'pendiente' || value === 'parcial' || value === 'pagada';
+  return value === 'pendiente' || value === 'parcial' || value === 'pagada' || value === 'anulada';
 }
 
 export function InvoicesPage() {
-  const [searchParams] = useSearchParams();
-  const initialStatus = searchParams.get('estado');
-  const { settings } = useSettings();
+  const { isAdmin } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { notify } = useToast();
+
+  const statusParam = searchParams.get('estado');
+  const status: StatusFilter = isValidStatus(statusParam) ? statusParam : 'todas';
+
+  const setStatus = (value: StatusFilter) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === 'todas') {
+      next.delete('estado');
+    } else {
+      next.set('estado', value);
+    }
+    setSearchParams(next, { replace: true });
+  };
 
   const [invoices, setInvoices] = useState<InvoiceBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<StatusFilter>(
-    isValidStatus(initialStatus) ? initialStatus : 'todas',
-  );
   const [month, setMonth] = useState('');
   const [exporting, setExporting] = useState(false);
 
@@ -97,23 +107,22 @@ export function InvoicesPage() {
   const listSummary = useMemo(() => {
     let balance = 0;
     for (const invoice of filtered) {
-      balance += Number(invoice.balance) || 0;
+      if (invoice.currency_code === BUSINESS_CURRENCY.currency_code && invoice.status !== 'anulada') {
+        balance += Number(invoice.balance) || 0;
+      }
     }
     return { count: filtered.length, balance: Math.round(balance * 100) / 100 };
   }, [filtered]);
 
   const handleExport = async () => {
-    if (!settings) {
-      notify('La configuración del negocio aún no está disponible.', 'error');
-      return;
-    }
     if (filtered.length === 0) {
       notify('No hay facturas para exportar con los filtros actuales.', 'info');
       return;
     }
     setExporting(true);
     try {
-      await downloadInvoicesExcel(filtered, settings);
+      const { downloadInvoicesExcel } = await import('../lib/excel/invoicesListExcel');
+      await downloadInvoicesExcel(filtered);
       notify('Listado exportado a Excel.', 'success');
     } catch (cause) {
       notify(describeError(cause), 'error');
@@ -142,10 +151,10 @@ export function InvoicesPage() {
               )}
               Exportar Excel
             </button>
-            <Link to="/facturas/nueva" className="btn btn-accent">
+            {isAdmin ? <Link to="/facturas/nueva" className="btn btn-accent">
               <Plus className="h-4 w-4" />
               Nueva factura
-            </Link>
+            </Link> : null}
           </>
         }
       />
@@ -153,7 +162,7 @@ export function InvoicesPage() {
       <div className="card mb-4 p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <input
               type="search"
               value={search}
@@ -180,7 +189,7 @@ export function InvoicesPage() {
           </div>
         </div>
 
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+        <div className="mt-3 flex flex-wrap gap-2">
           {STATUS_OPTIONS.map((option) => (
             <button
               key={option.value}
@@ -200,7 +209,7 @@ export function InvoicesPage() {
 
       {loading ? (
         <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-slate-500">
-          <Spinner className="h-6 w-6 text-sky" />
+          <Spinner className="h-6 w-6 text-accent" />
           <p className="text-sm font-medium">Cargando facturas…</p>
         </div>
       ) : error ? (
@@ -220,12 +229,12 @@ export function InvoicesPage() {
               ? 'Crea la primera factura para comenzar a controlar tus ventas.'
               : 'Prueba con otro término de búsqueda o cambia los filtros.'
           }
-          action={
+          action={isAdmin ? (
             <Link to="/facturas/nueva" className="btn btn-accent btn-sm">
               <Plus className="h-4 w-4" />
               Nueva factura
             </Link>
-          }
+          ) : null}
         />
       ) : (
         <>
@@ -235,7 +244,7 @@ export function InvoicesPage() {
               {listSummary.count === 1 ? 'factura' : 'facturas'}
             </span>
             <span>
-              Saldo del listado:{' '}
+              Saldo vigente en COP:{' '}
               <Money value={listSummary.balance} className="font-bold text-navy" />
             </span>
           </div>
@@ -258,27 +267,28 @@ export function InvoicesPage() {
                   </div>
                   <StatusBadge status={invoice.status} />
                 </div>
-                <div className="mt-3 flex items-end justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 min-[400px]:grid-cols-3">
+                  <div className="col-span-2 min-[400px]:col-span-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Fecha
                     </p>
                     <p className="text-xs text-slate-600">
                       {formatDate(invoice.issue_date)}
                     </p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  <div className="min-w-0 min-[400px]:text-right">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Total
                     </p>
-                    <Money value={invoice.total} className="text-sm font-bold text-navy" />
+                    <Money value={invoice.total} invoice={invoice} className="text-sm font-bold text-navy" />
                   </div>
-                  <div className="text-right">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  <div className="min-w-0 text-right">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Saldo
                     </p>
                     <Money
                       value={invoice.balance}
+                      invoice={invoice}
                       className={`text-sm font-bold ${
                         Number(invoice.balance) > 0.009
                           ? 'text-red-600'
@@ -321,10 +331,10 @@ export function InvoicesPage() {
                         {invoice.customer_name}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-navy">
-                        <Money value={invoice.total} />
+                        <Money value={invoice.total} invoice={invoice} />
                       </td>
                       <td className="px-4 py-3 text-right text-emerald-600">
-                        <Money value={invoice.paid_amount} />
+                        <Money value={invoice.paid_amount} invoice={invoice} />
                       </td>
                       <td
                         className={`px-4 py-3 text-right font-semibold ${
@@ -333,7 +343,7 @@ export function InvoicesPage() {
                             : 'text-emerald-600'
                         }`}
                       >
-                        <Money value={invoice.balance} />
+                        <Money value={invoice.balance} invoice={invoice} />
                       </td>
                       <td className="px-4 py-3">
                         <StatusBadge status={invoice.status} />
@@ -341,7 +351,7 @@ export function InvoicesPage() {
                       <td className="px-2 py-3">
                         <Link
                           to={`/facturas/${invoice.id}`}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-surface hover:text-navy"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-surface hover:text-navy"
                           aria-label={`Ver factura ${formatInvoiceNumber(invoice.number)}`}
                         >
                           <ChevronRight className="h-4 w-4" />

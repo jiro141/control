@@ -14,6 +14,10 @@ export default {
           soft: '#3FA9E0',
           light: '#E4F3FB',
         },
+        accent: {
+          DEFAULT: '#1B6FA8',
+          hover: '#155A8A',
+        },
         surface: '#F4F7FB',
         line: '#D8E3F0',
       },

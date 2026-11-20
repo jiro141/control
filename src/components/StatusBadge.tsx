@@ -4,12 +4,14 @@ const styles: Record<InvoiceStatus, string> = {
   pendiente: 'bg-red-50 text-red-700 ring-red-200',
   parcial: 'bg-amber-50 text-amber-700 ring-amber-200',
   pagada: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  anulada: 'bg-slate-100 text-slate-700 ring-slate-300',
 };
 
 const labels: Record<InvoiceStatus, string> = {
   pendiente: 'Pendiente',
   parcial: 'Parcial',
   pagada: 'Pagada',
+  anulada: 'Anulada',
 };
 
 export function StatusBadge({
