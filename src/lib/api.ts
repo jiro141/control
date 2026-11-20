@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { describeError } from './errors';
+import { readDashboardPayments, readInvoiceBalances } from './dashboardQueries';
 import { BUSINESS_CURRENCY } from './format';
 import { readAllPages } from './pagination';
 import type {
@@ -160,9 +161,7 @@ export async function deleteCustomer(id: string): Promise<void> {
 }
 
 export async function fetchInvoices(): Promise<InvoiceBalance[]> {
-  return readAllPages<InvoiceBalance>((from, to) =>
-    supabase.from('invoice_balances').select('*').order('number', { ascending: false }).range(from, to),
-  ).catch(fail);
+  return readInvoiceBalances(supabase).catch(fail);
 }
 
 export async function fetchInvoice(id: string): Promise<InvoiceBalance> {
@@ -191,10 +190,7 @@ export async function fetchPayments(invoiceId: string): Promise<Payment[]> {
 }
 
 export async function fetchAllPayments(): Promise<Payment[]> {
-  return readAllPages<Payment>((from, to) =>
-    supabase.from('payments').select('*').is('voided_at', null)
-      .order('paid_at', { ascending: false }).order('id').range(from, to),
-  ).catch(fail);
+  return readDashboardPayments(supabase).catch(fail);
 }
 
 export class InvoiceRefetchError extends Error {

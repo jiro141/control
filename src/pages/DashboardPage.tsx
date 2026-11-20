@@ -15,7 +15,9 @@ import { StatusBadge } from '../components/StatusBadge';
 import { EmptyState } from '../components/EmptyState';
 import { Spinner } from '../components/Spinner';
 import { useAuth } from '../context/AuthContext';
+import { useSettings } from '../context/SettingsContext';
 import { fetchAllPayments, fetchInvoices } from '../lib/api';
+import { groupDashboardRecords } from '../lib/dashboardRecords';
 import { describeError } from '../lib/errors';
 import {
   MONTHS_SHORT_ES,
@@ -48,13 +50,23 @@ function buildMonthPoints(): { key: string; label: string }[] {
 
 export function DashboardPage() {
   const { isAdmin } = useAuth();
+  const { settings, error: settingsError, refresh: refreshSettings } = useSettings();
   const [invoices, setInvoices] = useState<InvoiceBalance[]>([]);
-  const copInvoices = useMemo(() => invoices.filter((invoice) =>
-    invoice.currency_code === BUSINESS_CURRENCY.currency_code && invoice.status !== 'anulada',
-  ), [invoices]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [selectedCurrency, setSelectedCurrency] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const needsHistoricalCurrency = !settings && invoices.some((invoice) => !invoice.currency_code);
+
+  const { groups, defaultGroup, history } = useMemo(
+    () => groupDashboardRecords(invoices, payments, settings ?? BUSINESS_CURRENCY, BUSINESS_CURRENCY),
+    [invoices, payments, settings],
+  );
+  const {
+    currency,
+    invoices: activeInvoices,
+    payments: activePayments,
+  } = (selectedCurrency && groups.get(selectedCurrency)) || defaultGroup;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,10 +77,7 @@ export function DashboardPage() {
         fetchAllPayments(),
       ]);
       setInvoices(loadedInvoices);
-      const billedInCop = new Set(loadedInvoices.filter((invoice) =>
-        invoice.currency_code === BUSINESS_CURRENCY.currency_code && invoice.status !== 'anulada',
-      ).map((invoice) => invoice.id));
-      setPayments(loadedPayments.filter((payment) => billedInCop.has(payment.invoice_id)));
+      setPayments(loadedPayments);
     } catch (cause) {
       setError(describeError(cause));
     } finally {
@@ -84,32 +93,32 @@ export function DashboardPage() {
     let billed = 0;
     let collected = 0;
     let outstanding = 0;
-    for (const invoice of copInvoices) {
+    for (const invoice of activeInvoices) {
       billed += Number(invoice.total) || 0;
       collected += Number(invoice.paid_amount) || 0;
       outstanding += Math.max(0, Number(invoice.balance) || 0);
     }
     return {
-      count: copInvoices.length,
+      count: activeInvoices.length,
       billed: Math.round(billed * 100) / 100,
       collected: Math.round(collected * 100) / 100,
       outstanding: Math.round(outstanding * 100) / 100,
     };
-  }, [copInvoices]);
+  }, [activeInvoices]);
 
   const currentMonthKey = monthKeyOf(todayISO());
 
   const currentMonth = useMemo(() => {
     let billed = 0;
     let count = 0;
-    for (const invoice of copInvoices) {
+    for (const invoice of activeInvoices) {
       if (monthKeyOf(invoice.issue_date) === currentMonthKey) {
         billed += Number(invoice.total) || 0;
         count += 1;
       }
     }
     let collected = 0;
-    for (const payment of payments) {
+    for (const payment of activePayments) {
       if (monthKeyOf(payment.paid_at) === currentMonthKey) {
         collected += Number(payment.amount) || 0;
       }
@@ -119,18 +128,18 @@ export function DashboardPage() {
       collected: Math.round(collected * 100) / 100,
       count,
     };
-  }, [copInvoices, payments, currentMonthKey]);
+  }, [activeInvoices, activePayments, currentMonthKey]);
 
   const months = useMemo<MonthPoint[]>(() => {
     return buildMonthPoints().map((point) => {
       let billed = 0;
       let collected = 0;
-      for (const invoice of copInvoices) {
+      for (const invoice of activeInvoices) {
         if (monthKeyOf(invoice.issue_date) === point.key) {
           billed += Number(invoice.total) || 0;
         }
       }
-      for (const payment of payments) {
+      for (const payment of activePayments) {
         if (monthKeyOf(payment.paid_at) === point.key) {
           collected += Number(payment.amount) || 0;
         }
@@ -141,7 +150,7 @@ export function DashboardPage() {
         collected: Math.round(collected * 100) / 100,
       };
     });
-  }, [copInvoices, payments]);
+  }, [activeInvoices, activePayments]);
 
   const chartMax = useMemo(() => {
     const values = months.flatMap((month) => [month.billed, month.collected]);
@@ -150,19 +159,19 @@ export function DashboardPage() {
 
   const recentInvoices = useMemo(
     () =>
-      [...invoices]
+      [...history]
         .sort((a, b) => b.created_at.localeCompare(a.created_at))
         .slice(0, 5),
-    [invoices],
+    [history],
   );
 
   const outstandingInvoices = useMemo(
     () =>
-      [...invoices]
+      [...history]
         .filter((invoice) => invoice.status !== 'anulada' && Number(invoice.balance) > 0.009)
         .sort((a, b) => a.issue_date.localeCompare(b.issue_date))
         .slice(0, 5),
-    [invoices],
+    [history],
   );
 
   const barHeight = (value: number) => {
@@ -170,7 +179,7 @@ export function DashboardPage() {
     return `${Math.max(5, Math.round((value / chartMax) * 100))}%`;
   };
 
-  if (loading) {
+  if (loading || (!error && needsHistoricalCurrency && !settingsError)) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-slate-500">
         <Spinner className="h-6 w-6 text-accent" />
@@ -179,12 +188,21 @@ export function DashboardPage() {
     );
   }
 
-  if (error) {
+  if (error || needsHistoricalCurrency) {
     return (
       <div className="card mx-auto max-w-lg p-6 text-center">
         <AlertCircle className="mx-auto h-8 w-8 text-red-500" />
-        <p className="mt-3 text-sm font-semibold text-navy">{error}</p>
-        <button type="button" onClick={() => void load()} className="btn btn-primary mt-4">
+        <p className="mt-3 text-sm font-semibold text-navy">
+          {error ?? 'No se pudo identificar la moneda de las facturas históricas.'}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            if (needsHistoricalCurrency) void refreshSettings();
+            void load();
+          }}
+          className="btn btn-primary mt-4"
+        >
           Reintentar
         </button>
       </div>
@@ -195,7 +213,7 @@ export function DashboardPage() {
     <div>
       <PageHeader
         title="Inicio"
-        subtitle="Resumen de facturación, cobros y saldos de facturas vigentes en COP."
+        subtitle={`Resumen de facturación, cobros y saldos de facturas vigentes en ${currency.currency_code}.`}
         actions={isAdmin ? (
           <Link to="/facturas/nueva" className="btn btn-accent">
             <Plus className="h-4 w-4" />
@@ -203,6 +221,22 @@ export function DashboardPage() {
           </Link>
         ) : null}
       />
+
+      {groups.size > 1 ? (
+        <div className="mb-3 max-w-56">
+          <label htmlFor="dashboard-currency" className="label">Moneda del resumen</label>
+          <select
+            id="dashboard-currency"
+            className="input"
+            value={currency.currency_code}
+            onChange={(event) => setSelectedCurrency(event.target.value)}
+          >
+            {Array.from(groups.keys()).sort().map((code) => (
+              <option key={code} value={code}>{code}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div className="card p-4">
@@ -228,6 +262,7 @@ export function DashboardPage() {
           </div>
           <Money
             value={metrics.billed}
+            invoice={currency}
             className="mt-3 block text-lg font-extrabold text-navy sm:text-2xl"
           />
         </div>
@@ -243,6 +278,7 @@ export function DashboardPage() {
           </div>
           <Money
             value={metrics.collected}
+            invoice={currency}
             className="mt-3 block text-lg font-extrabold text-emerald-600 sm:text-2xl"
           />
         </div>
@@ -258,6 +294,7 @@ export function DashboardPage() {
           </div>
           <Money
             value={metrics.outstanding}
+            invoice={currency}
             className="mt-3 block text-lg font-extrabold text-red-600 sm:text-2xl"
           />
         </div>
@@ -292,12 +329,12 @@ export function DashboardPage() {
                   <div
                     className="w-2.5 rounded-t bg-navy/90 sm:w-3.5"
                     style={{ height: barHeight(month.billed) }}
-                    title={`Facturado: ${formatMoney(month.billed, '$', 'COP')}`}
+                    title={`Facturado: ${formatMoney(month.billed, currency.currency_symbol, currency.currency_code)}`}
                   />
                   <div
                     className="w-2.5 rounded-t bg-sky sm:w-3.5"
                     style={{ height: barHeight(month.collected) }}
-                    title={`Cobrado: ${formatMoney(month.collected, '$', 'COP')}`}
+                    title={`Cobrado: ${formatMoney(month.collected, currency.currency_symbol, currency.currency_code)}`}
                   />
                 </div>
                 <span className="mt-2 text-[10px] font-semibold uppercase text-slate-500">
@@ -320,12 +357,13 @@ export function DashboardPage() {
             </div>
             <div className="flex items-center justify-between rounded-xl bg-surface px-3 py-2.5">
               <span className="text-xs font-semibold text-slate-500">Facturado</span>
-              <Money value={currentMonth.billed} className="text-sm font-bold text-navy" />
+              <Money value={currentMonth.billed} invoice={currency} className="text-sm font-bold text-navy" />
             </div>
             <div className="flex items-center justify-between rounded-xl bg-surface px-3 py-2.5">
               <span className="text-xs font-semibold text-slate-500">Cobrado</span>
               <Money
                 value={currentMonth.collected}
+                invoice={currency}
                 className="text-sm font-bold text-emerald-600"
               />
             </div>
